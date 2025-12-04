@@ -153,6 +153,8 @@ jobs:
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: ./scripts/feeds install -a
 
+      sed -i '/luci-app-baidupcs-web/d' .config
+
     - name: 加载自定义配置
       env:
         CONFIG_FILE_PATH: ${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}

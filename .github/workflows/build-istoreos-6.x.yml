@@ -96,7 +96,7 @@ jobs:
       working-directory: ${{ env.WORKDIR }}/workdir
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b ${{ env.REPO_BRANCH }} openwrt --depth=1  # 浅克隆，减少源码体积
+        git clone $REPO_URL -b ${{ env.REPO_BRANCH }} openwrt   # 浅克隆，减少源码体积
         ln -sf ${{ env.WORKDIR }}/workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: 执行xiguapi-v3设备适配脚本

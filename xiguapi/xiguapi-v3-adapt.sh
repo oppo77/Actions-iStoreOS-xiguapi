@@ -111,7 +111,6 @@ modify_armv8_mk() {
     # 确保目录存在
     ensure_dir "$armv8_dir"
 
-
     # 避免重复添加
     if grep -q "define Device/${DEVICE_DEF}" "$armv8_mk"; then
         warn "${DEVICE_DEF} 已存在于 armv8.mk，跳过追加"
@@ -168,21 +167,18 @@ EOF
         warn "${uboot_def} 已存在，跳过"
     fi
 
-    # 添加到UBOOT_TARGETS
-    if ! grep -q " ${DEVICE_NAME}-${SOC} " "$uboot_makefile"; then
-        sed -i "/^UBOOT_TARGETS :=/ {
-            /\\\$/! s/$/ \\\\/
-            a \ \ ${DEVICE_NAME}-${SOC} \\
-        }" "$uboot_makefile"
-        # 清理多余反斜杠
-        sed -i '/^UBOOT_TARGETS :=/ {
-            :loop
-            n
-            /^[^ \t]/! {
-                s/\\\$//
-                b loop
-            }
-        }' "$uboot_makefile"
+    # 添加到UBOOT_TARGETS - 【核心修复】修正sed语法
+    if ! grep -q "${DEVICE_NAME}-${SOC}" "$uboot_makefile"; then
+        # 修复点1：改用-e分隔表达式，单行写法避免括号不匹配
+        # 步骤1：给UBOOT_TARGETS行末尾加反斜杠（如果没有）
+        sed -i -e "/^UBOOT_TARGETS :=/ { /\\$/! s/\$/ \\/; }" \
+             # 步骤2：在UBOOT_TARGETS行下追加设备名
+             -e "/^UBOOT_TARGETS :=/ a\  ${DEVICE_NAME}-${SOC} \\" \
+             "$uboot_makefile"
+        
+        # 修复点2：清理多余反斜杠 - 改用单行循环语法
+        sed -i -e '/^UBOOT_TARGETS :=/ { :loop; n; /^[^ \t]/! { s/\\$//; b loop; }; }' "$uboot_makefile"
+        
         info "已添加 ${DEVICE_NAME}-${SOC} 到 UBOOT_TARGETS"
     else
         warn "${DEVICE_NAME}-${SOC} 已在UBOOT_TARGETS中，跳过"

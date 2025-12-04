@@ -1,4 +1,4 @@
-name: Build iStoreos-xiguapi-v3
+name: Build iStore OS 6.x
 
 on:
   repository_dispatch:
@@ -19,12 +19,14 @@ env:
   TZ: Asia/Shanghai
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   ARCHITECTURE: armv8
+  # 保留OS_VERSION但runs-on直接写固定值，避免解析问题
   OS_VERSION: ubuntu-22.04
 
 jobs:
   build:
-    runs-on: ${{ env.OS_VERSION }}
-    fail-fast: false
+    # 直接写固定值，解决env引用解析问题
+    runs-on: ubuntu-22.04
+    # 移除无效的fail-fast（无matrix时该属性无意义）
 
     steps:
     - name: 合并磁盘
@@ -63,45 +65,33 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         echo "------------------------------- 系统更新升级 -------------------------------"
-        # 先更新源并升级系统（解决依赖版本冲突）
         sudo apt update -y && sudo apt upgrade -y
         
         echo "------------------------------- 安装编译核心依赖 -------------------------------"
-        # 整合所有依赖并去重，修正拼写错误，适配Ubuntu 22.04
         sudo apt install -y \
-          # 基础编译工具
           build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
           autoconf automake binutils libtool patch pkgconf quilt \
-          # 文本/配置处理
           gettext libncursesw5-dev libncurses-dev libreadline-dev \
-          # 系统/库依赖
           libssl-dev libelf-dev libglib2.0-dev device-tree-compiler libcrypt-compat \
           liblzma-dev libc6-dev-i386 lib32gcc-s1 lib32stdc++6 zlib1g-dev \
-          # 脚本/语言依赖
           python3 python3-pyelftools python3-setuptools python3-distutils \
           python3-pip python3-yaml python3-dev libpython3-dev \
-          # 工具类
           bzip2 ccache cpio curl rsync squashfs-tools unzip xxd bc haveged \
           uuid-runtime dosfstools mtools parted u-boot-tools \
           qemu-utils vim subversion git xsltproc libxml-parser-perl mercurial \
           bzr ecj cvs ant wget cmake ninja-build patchelf swig \
-          # Java依赖（uboot/固件打包）
           openjdk-11-jre-headless \
-          # 其他辅助工具
           apt-utils rsync curl wget sudo uuid-runtime
         
         echo "------------------------------- 清理冗余依赖/镜像 -------------------------------"
-        # 清理Docker镜像和无用软件（保留核心编译依赖）
         docker rmi `docker images -q` || true
         docker image prune -a -f || true
         sudo apt -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* \
           powershell openjdk-17-jre-headless mysql* php* mongodb* moby* snapd* android* || true
-        # 自动清理依赖缓存
         sudo apt autoremove --purge -y
         sudo apt clean -y
         
         echo "------------------------------- Python工具安装 -------------------------------"
-        # 补全Python依赖（确保pyelftools等生效）
         sudo pip3 install pyelftools setuptools yaml
         
         echo "------------------------------- 设置时区 -------------------------------"

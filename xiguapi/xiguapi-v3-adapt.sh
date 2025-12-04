@@ -4,7 +4,15 @@ set -euo pipefail  # 严格模式，出错立即退出
 # ===================== 核心路径配置 =====================
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEVICE_FILES_DIR="${SCRIPT_DIR}"
-SOURCE_ROOT_DIR=$(cd "${SCRIPT_DIR}/.." && pwd) || { echo "源码根目录获取失败"; exit 1; }
+
+# 【修改1】修正源码根目录：优先读取环境变量，默认指向脚本上级的openwrt目录
+OPENWRT_ROOT="${OPENWRT_ROOT:-${SCRIPT_DIR}/../openwrt}"
+SOURCE_ROOT_DIR=$(cd "${OPENWRT_ROOT}" && pwd) || { 
+    echo "ERROR: 未找到OpenWRT源码目录！请检查："
+    echo "  1. 是否克隆了OpenWRT源码到 ${SCRIPT_DIR}/../openwrt 目录；"
+    echo "  2. 或通过 export OPENWRT_ROOT=「你的源码目录」 指定路径；"
+    exit 1; 
+}
 
 # ===================== 设备固定配置 =====================
 DEVICE_NAME="xiguapi-v3"
@@ -72,7 +80,7 @@ init_check() {
     done
     info "所有必需设备文件验证通过"
 
-    # 切换工作目录
+    # 切换工作目录到源码根目录
     cd "${SOURCE_ROOT_DIR}" || error "无法进入源码根目录: ${SOURCE_ROOT_DIR}"
     info "当前工作目录: $(pwd)"
 }
@@ -80,26 +88,40 @@ init_check() {
 copy_device_files() {
     info "===== 2. 复制设备文件 ====="
     
-    # 复制DTS文件
-    local dts_dest="target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
+    # 【修改2】补全所有目标路径为绝对路径
+    local dts_dest="${SOURCE_ROOT_DIR}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
     copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "$dts_dest"
 
-    # 复制defconfig
-    local defconfig_dest="package/boot/uboot-rockchip/src/configs/${UBOOT_CONFIG}_defconfig"
+    local defconfig_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/configs/${UBOOT_CONFIG}_defconfig"
     copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3_defconfig" "$defconfig_dest"
 
-    # 复制u-boot.dtsi
-    local dtsi_dest="package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
+    local dtsi_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
     copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3-u-boot.dtsi" "$dtsi_dest"
 
-    # 复制上游DTS
-    local upstream_dts_dest="package/boot/uboot-rockchip/src/dts/upstream/src/arm64/rockchip/rk3568-xiguapi-v3.dts"
+    local upstream_dts_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/dts/upstream/src/arm64/rockchip/rk3568-xiguapi-v3.dts"
     copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "$upstream_dts_dest"
 }
 
 modify_armv8_mk() {
     info "===== 3. 修改armv8.mk ====="
-    local armv8_mk="target/linux/rockchip/image/armv8.mk"
+    # 【修改3】补全路径 + 前置检查
+    local armv8_mk="${SOURCE_ROOT_DIR}/target/linux/rockchip/image/armv8.mk"
+    local armv8_dir=$(dirname "$armv8_mk")
+
+    # 确保目录存在
+    ensure_dir "$armv8_dir"
+
+    # 若文件不存在则创建空文件
+    if [ ! -f "$armv8_mk" ]; then
+        warn "armv8.mk 文件不存在，创建空文件：$armv8_mk"
+        touch "$armv8_mk" || error "创建 armv8.mk 失败"
+    fi
+
+    # 避免重复添加
+    if grep -q "define Device/${DEVICE_DEF}" "$armv8_mk"; then
+        warn "${DEVICE_DEF} 已存在于 armv8.mk，跳过追加"
+        return
+    fi
 
     # 添加设备定义
     cat >> "$armv8_mk" << EOF
@@ -123,7 +145,8 @@ EOF
 
 modify_uboot_makefile() {
     info "===== 4. 修改uboot-rockchip Makefile ====="
-    local uboot_makefile="package/boot/uboot-rockchip/Makefile"
+    # 【修改4】补全路径
+    local uboot_makefile="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"
     
     # 备份原文件
     if [ ! -f "${uboot_makefile}.bak.xiguapi" ]; then
@@ -174,8 +197,8 @@ EOF
 modify_device_configs() {
     info "===== 5. 修改设备配置文件 ====="
     
-    # 修改LED配置
-    local leds_file="target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
+    # 【修改5】补全路径
+    local leds_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
     ensure_dir "$(dirname "$leds_file")"
     [ ! -f "$leds_file" ] && touch "$leds_file" && info "创建空文件: $leds_file"
     [ ! -f "${leds_file}.bak.xiguapi" ] && cp -f "$leds_file" "${leds_file}.bak.xiguapi"
@@ -194,8 +217,8 @@ nlnet,${DEVICE_NAME})\
         warn "${DEVICE_NAME} LED配置已存在，跳过"
     fi
 
-    # 修改网络配置
-    local network_file="target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
+    # 【修改6】补全路径
+    local network_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
     ensure_dir "$(dirname "$network_file")"
     [ ! -f "$network_file" ] && touch "$network_file" && info "创建空文件: $network_file"
     [ ! -f "${network_file}.bak.xiguapi" ] && cp -f "$network_file" "${network_file}.bak.xiguapi"
@@ -222,8 +245,8 @@ nlnet,${DEVICE_NAME})\
         warn "${DEVICE_NAME} 网络配置已存在，跳过"
     fi
 
-    # 修改初始化配置
-    local init_file="target/linux/rockchip/armv8/base-files/lib/board/init.sh"
+    # 【修改7】补全路径
+    local init_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
     ensure_dir "$(dirname "$init_file")"
     [ ! -f "$init_file" ] && touch "$init_file" && info "创建空文件: $init_file"
     [ ! -f "${init_file}.bak.xiguapi" ] && cp -f "$init_file" "${init_file}.bak.xiguapi"
@@ -254,10 +277,11 @@ nlnet,${DEVICE_NAME})\
 verify_changes() {
     info "===== 6. 验证修改结果 ====="
     local error_count=0
-    local dts_file="target/linux/rockchip/dts/rk3568/${UBOOT_CONFIG}.dts"
+    # 【修改8】补全路径
+    local dts_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/dts/rk3568/${UBOOT_CONFIG}.dts"
 
     # 验证设备定义
-    if ! grep -q "define Device/${DEVICE_DEF}" "target/linux/rockchip/image/armv8.mk"; then
+    if ! grep -q "define Device/${DEVICE_DEF}" "${SOURCE_ROOT_DIR}/target/linux/rockchip/image/armv8.mk"; then
         error "armv8.mk 中未找到 ${DEVICE_DEF} 设备定义"
         error_count=$((error_count+1))
     else
@@ -265,7 +289,7 @@ verify_changes() {
     fi
 
     # 验证UBOOT定义
-    if ! grep -q "U-Boot/${DEVICE_NAME}-${SOC}" "package/boot/uboot-rockchip/Makefile"; then
+    if ! grep -q "U-Boot/${DEVICE_NAME}-${SOC}" "${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"; then
         error "uboot Makefile 中未找到 ${DEVICE_NAME}-${SOC} 定义"
         error_count=$((error_count+1))
     else
@@ -288,9 +312,9 @@ verify_changes() {
 
     # 验证LED/网络/init配置
     local check_files=(
-        "target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
-        "target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
-        "target/linux/rockchip/armv8/base-files/lib/board/init.sh"
+        "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
+        "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
+        "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
     )
     for file in "${check_files[@]}"; do
         if [ ! -f "$file" ]; then

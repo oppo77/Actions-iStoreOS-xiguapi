@@ -111,11 +111,6 @@ modify_armv8_mk() {
     # 确保目录存在
     ensure_dir "$armv8_dir"
 
-    # 若文件不存在则创建空文件
-    if [ ! -f "$armv8_mk" ]; then
-        warn "armv8.mk 文件不存在，创建空文件：$armv8_mk"
-        touch "$armv8_mk" || error "创建 armv8.mk 失败"
-    fi
 
     # 避免重复添加
     if grep -q "define Device/${DEVICE_DEF}" "$armv8_mk"; then

@@ -1,4 +1,4 @@
-name: Build iStore OS 6.x
+name: Build iStoreos-xiguapi-v3
 
 on:
   repository_dispatch:

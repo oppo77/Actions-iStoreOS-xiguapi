@@ -21,10 +21,25 @@ jobs:
 
         FILE_PATH="./armv8/.config"
         if [ -f "$FILE_PATH" ] && [ -s "$FILE_PATH" ]; then
+           # 读取并清理自定义配置（去首尾空格）
            content=$(cat ${GITHUB_WORKSPACE}/configfiles/config_data-6.x.txt)
            configdata=$(echo "$content" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+           # 追加自定义配置到.config末尾
            echo -e "\\n$configdata" >> ./armv8/.config
-           # 清除.config配置文件里面重复的配置项
+
+           # ========== 优化后的删除逻辑 ==========
+           # 1. 批量删除所有 CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE 开头的配置项（单个命令）
+           sed -i '/^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE/d' ./armv8/.config
+           # 2. 删除 CONFIG_TARGET_MULTI_PROFILE=y 配置项
+           sed -i '/^CONFIG_TARGET_MULTI_PROFILE=y$/d' ./armv8/.config
+           # =====================================
+
+           # ========== 添加指定的两个配置项 ==========
+           echo -e "\nCONFIG_TARGET_PROFILE=\"DEVICE_nlnet_xiguapi-v3\"" >> ./armv8/.config
+           echo "CONFIG_TARGET_rockchip_armv8_DEVICE_nlnet_xiguapi-v3=y" >> ./armv8/.config
+           # =========================================
+
+           # 清除重复配置项 + 过滤空行
            configdata2=$(cat ./armv8/.config)
            echo "$configdata2" | awk '!seen[$0]++ && NF > 0' > ./armv8/.config
         else

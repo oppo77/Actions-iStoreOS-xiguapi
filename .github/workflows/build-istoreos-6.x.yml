@@ -63,21 +63,6 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        echo "------------------------------- 深度清理磁盘（优先释放空间） -------------------------------"
-        # 1. 删除超大体积冗余目录/文件（单次释放数GB）
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo rm -rf /var/lib/docker /var/cache/apt/archives/* /var/lib/apt/lists/*
-        sudo rm -rf /usr/local/share/powershell /usr/bin/pwsh /opt/az
-        sudo rm -rf /snap /var/lib/snapd
-        sudo rm -rf /mnt/* /tmp/*
-        
-        # 2. 卸载所有无用大包（避免apt upgrade自动安装）
-        sudo apt remove -y --purge azure-cli powershell snapd podman containernetworking-plugins || true
-        sudo apt autoremove -y --purge
-        sudo apt clean -y
-        
-        echo -e "------------------------------- 磁盘信息（清理后） -------------------------------\n"
-        df -Th
 
         echo "------------------------------- 仅更新源（跳过upgrade，避免占用空间） -------------------------------"
         # 关键：跳过apt upgrade（编译iStoreOS无需系统升级，仅需安装依赖）

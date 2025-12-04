@@ -13,7 +13,7 @@ on:
 
 env:
   REPO_URL: https://github.com/istoreos/istoreos
-  # REPO_BRANCH: main
+  REPO_BRANCH: istoreos-24.10.2  # 固定分支为24.10.2
   FEEDS_CONF: feeds.conf
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1-6.x.sh
@@ -23,22 +23,14 @@ env:
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ARCHITECTURE: armv8  # 固定架构为armv8（适配xiguapi-v3）
+  OS_VERSION: ubuntu-22.04  # 固定编译系统
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        REPO_BRANCH:
-          # - main
-          - istoreos-24.10
-          # - istoreos-23.05
-        ARCHITECTURE:
-          - armv8
-        os:
-          - ubuntu-22.04
-
-      fail-fast: false
+    runs-on: ${{ env.OS_VERSION }}  # 移除矩阵，直接使用固定系统
+    # 移除matrix配置，单任务编译xiguapi-v3
+    fail-fast: false
 
     steps:
     - name: 合并磁盘
@@ -79,7 +71,7 @@ jobs:
         echo "------------------------------- 更新并安装依赖 -------------------------------"
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /etc/mysql /etc/php /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(cat $GITHUB_WORKSPACE/depends/${{ matrix.os }})
+        sudo -E apt-get -qq install $(cat $GITHUB_WORKSPACE/depends/${{ env.OS_VERSION }})
         wget https://bootstrap.pypa.io/pip/3.6/get-pip.py
         sudo python3 get-pip.py
         sudo rm -rf get-pip.py
@@ -97,19 +89,30 @@ jobs:
       working-directory: ${{ env.WORKDIR }}/workdir
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b ${{ matrix.REPO_BRANCH }} openwrt
+        git clone $REPO_URL -b ${{ env.REPO_BRANCH }} openwrt
         ln -sf ${{ env.WORKDIR }}/workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: 缓存构建动作
-      uses: klever1988/cachewrtbuild@main
-      with:
-        ccache: 'true'
-        mixkey: ${{ matrix.os }}-${{ matrix.ARCHITECTURE }}-${{ matrix.REPO_BRANCH }}
-        prefix: ${{ github.workspace }}/openwrt
+    # ========== 新增步骤：执行xiguapi-v3适配脚本 ==========
+    - name: 执行xiguapi-v3设备适配脚本
+      run: |
+        # 确认脚本路径（仓库根目录的xiguapi/下）
+        SCRIPT_PATH="${GITHUB_WORKSPACE}/xiguapi/xiguapi-v3-adapt.sh"
+        # 给脚本添加执行权限
+        chmod +x $SCRIPT_PATH
+        # 执行适配脚本（脚本内已处理源码根目录切换）
+        $SCRIPT_PATH
+        # 验证脚本执行结果
+        if [ $? -eq 0 ]; then
+          echo "✅ xiguapi-v3适配脚本执行成功"
+        else
+          echo "❌ xiguapi-v3适配脚本执行失败"
+          exit 1
+        fi
+    # =====================================================
 
     - name: 加载自定义 feeds
       env:
-        FEEDS_CONF_PATH: ${{ matrix.ARCHITECTURE }}/${{ env.FEEDS_CONF }}
+        FEEDS_CONF_PATH: ${{ env.ARCHITECTURE }}/${{ env.FEEDS_CONF }}
       run: |
         [ -e $FEEDS_CONF_PATH ] && mv $FEEDS_CONF_PATH openwrt/$FEEDS_CONF
         chmod +x $DIY_P1_SH
@@ -124,7 +127,7 @@ jobs:
 
     - name: 加载自定义配置
       env:
-        CONFIG_FILE_PATH: ${{ matrix.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
+        CONFIG_FILE_PATH: ${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
       run: |
         [ -e files ] && mv files openwrt/files
         [ -e $CONFIG_FILE_PATH ] && mv $CONFIG_FILE_PATH openwrt/$CONFIG_FILE
@@ -188,14 +191,16 @@ jobs:
       id: tag
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H.%M")-${{ matrix.ARCHITECTURE }}" >> ${GITHUB_OUTPUT}
+        echo "release_tag=$(date +"%Y.%m.%d-%H.%M")-${{ env.ARCHITECTURE }}-xiguapi-v3" >> ${GITHUB_OUTPUT}
         touch release.txt
         echo "
-        💻 架构: ${{ matrix.ARCHITECTURE }}
+        💻 架构: ${{ env.ARCHITECTURE }}
+
+        📇 设备: Xiguapi V3 (rk3568)
 
         📂 源码: ${{ env.REPO_URL }}
 
-        🌳 分支: ${{ matrix.REPO_BRANCH }}
+        🌳 分支: ${{ env.REPO_BRANCH }}
 
         ⏱️ 编译时间: $(date +"%Y年%m月%d日%H时%M分")
 
@@ -205,7 +210,7 @@ jobs:
 
         🔒 密码: password
 
-        📒 说明: 单网口设备默认网口为LAN，旁路由模式，需要接入主路由器后进后台查找对应IP地址访问，反之双网口设备默认网口为WAN+LAN，主路由模式。 " >> release.txt
+        📒 说明: Xiguapi V3 设备专属固件，默认网口 eth0=LAN, eth1=WAN，主路由模式。 " >> release.txt
         echo "status=success" >> ${GITHUB_OUTPUT}
 
     - name: 自动发布固件到 Releases

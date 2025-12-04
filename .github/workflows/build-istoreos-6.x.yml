@@ -19,22 +19,23 @@ env:
   TZ: Asia/Shanghai
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   ARCHITECTURE: armv8
-  # 保留OS_VERSION但runs-on直接写固定值，避免解析问题
-  OS_VERSION: ubuntu-22.04
 
 jobs:
   build:
-    # 直接写固定值，解决env引用解析问题
     runs-on: ubuntu-22.04
-    # 移除无效的fail-fast（无matrix时该属性无意义）
 
     steps:
-    - name: 合并磁盘
+    - name: 最大化磁盘空间（核心优化）
       uses: easimon/maximize-build-space@master
       with:
-        swap-size-mb: 1024
-        temp-reserve-mb: 100
-        root-reserve-mb: 1024
+        swap-size-mb: 2048  # 增大交换分区
+        temp-reserve-mb: 50
+        root-reserve-mb: 2048
+        # 自动删除大体积默认目录
+        remove-dotnet: true
+        remove-android: true
+        remove-haskell: true
+        remove-codeql: true
 
     - name: 准备完成
       uses: actions/checkout@main
@@ -55,19 +56,35 @@ jobs:
         echo "已安装内存详细信息: "
         sudo lshw -short -C memory | grep GiB
         echo -e "\n"
-        echo -e "------------------------------- 磁盘信息 -------------------------------\n"
-        echo -e "磁盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l) \n"
-        echo "------------------------------- 磁盘详情 -------------------------------\n"
+        echo -e "------------------------------- 磁盘信息（清理前） -------------------------------\n"
         df -Th
 
-    - name: 初始化编译环境
+    - name: 初始化编译环境（核心优化：先清理再装依赖）
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        echo "------------------------------- 系统更新升级 -------------------------------"
-        sudo apt update -y && sudo apt upgrade -y
+        echo "------------------------------- 深度清理磁盘（优先释放空间） -------------------------------"
+        # 1. 删除超大体积冗余目录/文件（单次释放数GB）
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        sudo rm -rf /var/lib/docker /var/cache/apt/archives/* /var/lib/apt/lists/*
+        sudo rm -rf /usr/local/share/powershell /usr/bin/pwsh /opt/az
+        sudo rm -rf /snap /var/lib/snapd
+        sudo rm -rf /mnt/* /tmp/*
         
-        echo "------------------------------- 安装编译核心依赖 -------------------------------"
+        # 2. 卸载所有无用大包（避免apt upgrade自动安装）
+        sudo apt remove -y --purge azure-cli powershell snapd podman containernetworking-plugins || true
+        sudo apt autoremove -y --purge
+        sudo apt clean -y
+        
+        echo -e "------------------------------- 磁盘信息（清理后） -------------------------------\n"
+        df -Th
+
+        echo "------------------------------- 仅更新源（跳过upgrade，避免占用空间） -------------------------------"
+        # 关键：跳过apt upgrade（编译iStoreOS无需系统升级，仅需安装依赖）
+        sudo apt update -y
+
+        echo "------------------------------- 安装编译核心依赖（最小化） -------------------------------"
+        # 仅保留编译必需依赖，删除所有非必要工具（如vim/mercurial/bzr等）
         sudo apt install -y \
           build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
           autoconf automake binutils libtool patch pkgconf quilt \
@@ -78,21 +95,14 @@ jobs:
           python3-pip python3-yaml python3-dev libpython3-dev \
           bzip2 ccache cpio curl rsync squashfs-tools unzip xxd bc haveged \
           uuid-runtime dosfstools mtools parted u-boot-tools \
-          qemu-utils vim subversion git xsltproc libxml-parser-perl mercurial \
-          bzr ecj cvs ant wget cmake ninja-build patchelf swig \
-          openjdk-11-jre-headless \
-          apt-utils rsync curl wget sudo uuid-runtime
-        
-        echo "------------------------------- 清理冗余依赖/镜像 -------------------------------"
-        docker rmi `docker images -q` || true
-        docker image prune -a -f || true
-        sudo apt -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* \
-          powershell openjdk-17-jre-headless mysql* php* mongodb* moby* snapd* android* || true
-        sudo apt autoremove --purge -y
-        sudo apt clean -y
+          git xsltproc libxml-parser-perl ant wget cmake ninja-build patchelf swig \
+          openjdk-11-jre-headless
         
         echo "------------------------------- Python工具安装 -------------------------------"
-        sudo pip3 install pyelftools setuptools yaml
+        sudo pip3 install pyelftools setuptools yaml --no-cache-dir  # 禁用缓存，节省空间
+        
+        echo "------------------------------- 最终磁盘检查 -------------------------------"
+        df -Th
         
         echo "------------------------------- 设置时区 -------------------------------"
         sudo timedatectl set-timezone "$TZ"
@@ -101,7 +111,7 @@ jobs:
       working-directory: ${{ env.WORKDIR }}/workdir
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b ${{ env.REPO_BRANCH }} openwrt
+        git clone $REPO_URL -b ${{ env.REPO_BRANCH }} openwrt --depth=1  # 浅克隆，减少源码体积
         ln -sf ${{ env.WORKDIR }}/workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: 执行xiguapi-v3设备适配脚本
@@ -152,7 +162,7 @@ jobs:
       run: |
         cd openwrt
         make defconfig
-        make download -j8
+        make download -j8 --no-cache  # 禁用下载缓存
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
@@ -160,7 +170,7 @@ jobs:
       id: package2
       run: |
         cd openwrt
-        make download -j8
+        make download -j8 --no-cache
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 

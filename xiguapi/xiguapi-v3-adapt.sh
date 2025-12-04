@@ -19,6 +19,8 @@ DEVICE_NAME="xiguapi-v3"
 SOC="rk3568"
 DEVICE_DEF="nlnet_xiguapi-v3"
 UBOOT_CONFIG="rk3568-xiguapi-v3"
+# 新增：统一board名称（逗号分隔，匹配01_leds原有格式）
+BOARD_FULL_NAME="nlnet,${DEVICE_NAME}"
 
 # ===================== 工具函数 =====================
 info() {
@@ -31,6 +33,11 @@ warn() {
 
 error() {
     echo -e "\033[31m[ERROR] $1\033[0m"
+    # 调试：输出文件内容帮助定位
+    if [ -f "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds" ]; then
+        echo -e "\033[31m[DEBUG] 01_leds 文件内容：\033[0m"
+        cat "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
+    fi
     exit 1
 }
 
@@ -188,77 +195,68 @@ EOF
 modify_device_configs() {
     info "===== 5. 修改设备配置文件 ====="
     
-    # 【修改5】补全路径
+    # 【修改5】修复01_leds配置（核心问题修复）
     local leds_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
     ensure_dir "$(dirname "$leds_file")"
     [ ! -f "$leds_file" ] && touch "$leds_file" && info "创建空文件: $leds_file"
-    [ ! -f "${leds_file}.bak.xiguapi" ] && cp -f "$leds_file" "${leds_file}.bak.xiguapi"
+    [ ! -f "${leds_file}.bak.xiguapi" ] && cp -f "$leds_file" "${leds_file}.bak.xiguapi" && info "备份01_leds: ${leds_file}.bak.xiguapi"
 
-    if ! grep -q "nlnet,${DEVICE_NAME}" "$leds_file"; then
-        sed -i '/^case \$board in/,/^esac/ {
-            /^esac/i\
-nlnet,${DEVICE_NAME})\
-    ucidef_set_led_default "power" "POWER" "blue:power" "1"\
-    ucidef_set_led_netdev "status" "STATUS" "blue:status" "eth0"\
-    ucidef_set_led_netdev "network" "NETWORK" "blue:network" "eth1"\
-    ;;
-        }' "$leds_file" || error "修改LED配置失败"
+    if ! grep -q "${BOARD_FULL_NAME}" "$leds_file"; then
+        # 修复点：使用Shell变量替换，适配原有case结构（允许case行有缩进，插入到esac上方）
+        # 改用printf构造sed脚本，确保变量正确替换
+        local leds_config=$(printf '%s' "${BOARD_FULL_NAME})\n\tucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"\n\tucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"\n\tucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"\n\t;;")
+        sed -i -e "/^[[:space:]]*esac/i\\
+${leds_config}
+" "$leds_file" || error "修改LED配置失败"
         info "已添加 ${DEVICE_NAME} LED配置"
+        # 调试：输出插入后的内容
+        info "DEBUG: 01_leds 插入后关键内容："
+        grep -A5 -B1 "${BOARD_FULL_NAME}" "$leds_file" || true
     else
         warn "${DEVICE_NAME} LED配置已存在，跳过"
     fi
 
-    # 【修改6】补全路径
+    # 【修改6】补全路径 + 修复变量替换
     local network_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
     ensure_dir "$(dirname "$network_file")"
     [ ! -f "$network_file" ] && touch "$network_file" && info "创建空文件: $network_file"
     [ ! -f "${network_file}.bak.xiguapi" ] && cp -f "$network_file" "${network_file}.bak.xiguapi"
 
-    if ! grep -q "nlnet,${DEVICE_NAME}" "$network_file"; then
-        # 接口配置
-        sed -i '/rockchip_setup_interfaces()/,/^}/ {
-            /^\s*\*)/i\
-\tnlnet,${DEVICE_NAME})\
-\t\tucidef_set_interfaces_lan_wan "eth0" "eth1"\
-\t\t;;
-        }' "$network_file" || error "修改网络接口配置失败"
+    if ! grep -q "${BOARD_FULL_NAME}" "$network_file"; then
+        # 接口配置 - 修复变量替换
+        local network_iface_config=$(printf '%s' "\t${BOARD_FULL_NAME})\n\t\tucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"\n\t\t;;")
+        sed -i -e "/rockchip_setup_interfaces()/,/^}/ { /^\s*\*)/i\\
+${network_iface_config}
+        }" "$network_file" || error "修改网络接口配置失败"
         
-        # MAC地址配置
-        sed -i '/rockchip_setup_macs()/,/^}/ {
-            /^\s*\*)/i\
-\tnlnet,${DEVICE_NAME})\
-\t\twan_mac=\$(generate_mac_from_boot_mmc)\
-\t\tlan_mac=\$(macaddr_add "\$wan_mac" 1)\
-\t\t;;
-        }' "$network_file" || error "修改MAC配置失败"
+        # MAC地址配置 - 修复变量替换
+        local network_mac_config=$(printf '%s' "\t${BOARD_FULL_NAME})\n\t\twan_mac=\$(generate_mac_from_boot_mmc)\n\t\tlan_mac=\$(macaddr_add \"\$wan_mac\" 1)\n\t\t;;")
+        sed -i -e "/rockchip_setup_macs()/,/^}/ { /^\s*\*)/i\\
+${network_mac_config}
+        }" "$network_file" || error "修改MAC配置失败"
         info "已添加 ${DEVICE_NAME} 网络配置"
     else
         warn "${DEVICE_NAME} 网络配置已存在，跳过"
     fi
 
-    # 【修改7】补全路径
+    # 【修改7】补全路径 + 修复变量替换
     local init_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
     ensure_dir "$(dirname "$init_file")"
     [ ! -f "$init_file" ] && touch "$init_file" && info "创建空文件: $init_file"
     [ ! -f "${init_file}.bak.xiguapi" ] && cp -f "$init_file" "${init_file}.bak.xiguapi"
 
-    if ! grep -q "nlnet,${DEVICE_NAME}" "$init_file"; then
-        # 接口修复
-        sed -i '/board_fixup_iface_name()/,/^}/ {
-            /^\s*\*)/i\
-\tnlnet,${DEVICE_NAME})\
-\t\t# No interface renaming needed\
-\t\t;;
-        }' "$init_file" || error "修改接口修复配置失败"
+    if ! grep -q "${BOARD_FULL_NAME}" "$init_file"; then
+        # 接口修复 - 修复变量替换
+        local init_iface_config=$(printf '%s' "\t${BOARD_FULL_NAME})\n\t\t# No interface renaming needed\n\t\t;;")
+        sed -i -e "/board_fixup_iface_name()/,/^}/ { /^\s*\*)/i\\
+${init_iface_config}
+        }" "$init_file" || error "修改接口修复配置失败"
         
-        # SMP亲和性
-        sed -i '/board_set_iface_smp_affinity()/,/^}/ {
-            /^\s*\*)/i\
-\tnlnet,${DEVICE_NAME})\
-\t\tset_iface_cpumask 2 eth0\
-\t\tset_iface_cpumask 4 eth1\
-\t\t;;
-        }' "$init_file" || error "修改SMP亲和性配置失败"
+        # SMP亲和性 - 修复变量替换
+        local init_smp_config=$(printf '%s' "\t${BOARD_FULL_NAME})\n\t\tset_iface_cpumask 2 eth0\n\t\tset_iface_cpumask 4 eth1\n\t\t;;")
+        sed -i -e "/board_set_iface_smp_affinity()/,/^}/ { /^\s*\*)/i\\
+${init_smp_config}
+        }" "$init_file" || error "修改SMP亲和性配置失败"
         info "已添加 ${DEVICE_NAME} 初始化配置"
     else
         warn "${DEVICE_NAME} 初始化配置已存在，跳过"
@@ -301,7 +299,7 @@ verify_changes() {
         fi
     fi
 
-    # 验证LED/网络/init配置
+    # 验证LED/网络/init配置（使用统一的BOARD_FULL_NAME）
     local check_files=(
         "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
         "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
@@ -311,8 +309,8 @@ verify_changes() {
         if [ ! -f "$file" ]; then
             error "配置文件不存在: $file"
             error_count=$((error_count+1))
-        elif ! grep -q "nlnet,${DEVICE_NAME}" "$file"; then
-            error "$file 中未找到 ${DEVICE_NAME} 配置"
+        elif ! grep -q "${BOARD_FULL_NAME}" "$file"; then
+            error "$file 中未找到 ${BOARD_FULL_NAME} 配置"
             error_count=$((error_count+1))
         else
             info "✓ $file 配置验证通过"

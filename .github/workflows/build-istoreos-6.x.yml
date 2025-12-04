@@ -28,8 +28,7 @@ env:
 
 jobs:
   build:
-    runs-on: ${{ env.OS_VERSION }}  # 移除矩阵，直接使用固定系统
-    # 移除matrix配置，单任务编译xiguapi-v3
+    runs-on: ${{ env.OS_VERSION }}
     fail-fast: false
 
     steps:
@@ -92,23 +91,17 @@ jobs:
         git clone $REPO_URL -b ${{ env.REPO_BRANCH }} openwrt
         ln -sf ${{ env.WORKDIR }}/workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    # ========== 新增步骤：执行xiguapi-v3适配脚本 ==========
     - name: 执行xiguapi-v3设备适配脚本
       run: |
-        # 确认脚本路径（仓库根目录的xiguapi/下）
         SCRIPT_PATH="${GITHUB_WORKSPACE}/xiguapi/xiguapi-v3-adapt.sh"
-        # 给脚本添加执行权限
         chmod +x $SCRIPT_PATH
-        # 执行适配脚本（脚本内已处理源码根目录切换）
         $SCRIPT_PATH
-        # 验证脚本执行结果
         if [ $? -eq 0 ]; then
           echo "✅ xiguapi-v3适配脚本执行成功"
         else
           echo "❌ xiguapi-v3适配脚本执行失败"
           exit 1
         fi
-    # =====================================================
 
     - name: 加载自定义 feeds
       env:
@@ -119,10 +112,18 @@ jobs:
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P1_SH
 
-    - name: 更新 feeds
+    # ========== 更新feeds 2遍 ==========
+    - name: 更新 feeds（第1遍）
       run: cd openwrt && ./scripts/feeds update -a
 
-    - name: 安装 feeds
+    - name: 更新 feeds（第2遍）
+      run: cd openwrt && ./scripts/feeds update -a
+
+    # ========== 安装feeds 2遍 ==========
+    - name: 安装 feeds（第1遍）
+      run: cd openwrt && ./scripts/feeds install -a
+
+    - name: 安装 feeds（第2遍）
       run: cd openwrt && ./scripts/feeds install -a
 
     - name: 加载自定义配置
@@ -142,12 +143,23 @@ jobs:
         # TELEGRAM_CHAT_ID: ${{ secrets.GITHUB_CHAT_ID }}
         # TELEGRAM_BOT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: 下载软件包
-      id: package
+    # ========== 下载软件包 2遍 ==========
+    - name: 下载软件包（第1遍）
+      id: package1
       run: |
         cd openwrt
         make defconfig
         make download -j8
+        # 清理无效小文件（小于1KB的可能是下载失败的残留）
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: 下载软件包（第2遍）
+      id: package2
+      run: |
+        cd openwrt
+        make download -j8  # 无需重新defconfig，复用之前的配置
+        # 再次清理无效文件，确保下载完整
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 

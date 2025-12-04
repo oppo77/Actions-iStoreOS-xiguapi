@@ -74,7 +74,7 @@ jobs:
           build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
           autoconf automake binutils libtool patch pkgconf quilt \
           gettext libncursesw5-dev libncurses-dev libreadline-dev \
-          libssl-dev libelf-dev libglib2.0-dev device-tree-compiler libcrypt-compat \
+          libssl-dev libelf-dev libglib2.0-dev device-tree-compiler \
           liblzma-dev libc6-dev-i386 lib32gcc-s1 lib32stdc++6 zlib1g-dev \
           python3 python3-pyelftools python3-setuptools python3-distutils \
           python3-pip python3-yaml python3-dev libpython3-dev \

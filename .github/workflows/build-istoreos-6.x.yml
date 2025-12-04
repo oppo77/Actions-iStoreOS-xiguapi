@@ -44,7 +44,8 @@ jobs:
       run: |
         mkdir -p ${GITHUB_WORKSPACE}/workdir
         chmod 755 ${GITHUB_WORKSPACE}/workdir
-        echo "WORKDIR=$PWD" >> $GITHUB_ENV
+        echo "WORKDIR=${GITHUB_WORKSPACE}/workdir" >> $GITHUB_ENV
+        echo "当前工作目录: $(pwd)"
 
     - name: 检查服务器配置
       run: |
@@ -93,59 +94,80 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
 
     - name: 克隆源码
-      working-directory: ${{ env.WORKDIR }}/workdir
+      working-directory: ${{ env.WORKDIR }}
       run: |
+        echo "当前工作目录: $(pwd)"
         df -hT $PWD
-        git clone $REPO_URL -b ${{ env.REPO_BRANCH }} openwrt   # 浅克隆，减少源码体积
-        ln -sf ${{ env.WORKDIR }}/workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        git clone ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} openwrt   # 浅克隆，减少源码体积
+        echo "源码克隆完成，当前目录内容:"
+        ls -la
+        ln -sf ${{ env.WORKDIR }}/openwrt $GITHUB_WORKSPACE/openwrt || true
 
     - name: 执行xiguapi-v3设备适配脚本
       run: |
+        echo "工作目录: ${{ env.WORKDIR }}"
         SCRIPT_PATH="${GITHUB_WORKSPACE}/xiguapi/xiguapi-v3-adapt.sh"
-        chmod +x $SCRIPT_PATH
-        $SCRIPT_PATH
-        if [ $? -eq 0 ]; then
-          echo "✅ xiguapi-v3适配脚本执行成功"
+        if [ -f "$SCRIPT_PATH" ]; then
+          echo "找到适配脚本: $SCRIPT_PATH"
+          chmod +x $SCRIPT_PATH
+          # 设置OPENWRT_ROOT环境变量
+          export OPENWRT_ROOT="${{ env.WORKDIR }}/openwrt"
+          echo "OPENWRT_ROOT设置为: $OPENWRT_ROOT"
+          $SCRIPT_PATH
+          if [ $? -eq 0 ]; then
+            echo "✅ xiguapi-v3适配脚本执行成功"
+          else
+            echo "❌ xiguapi-v3适配脚本执行失败"
+            exit 1
+          fi
         else
-          echo "❌ xiguapi-v3适配脚本执行失败"
+          echo "❌ 适配脚本不存在: $SCRIPT_PATH"
+          echo "当前目录内容:"
+          find ${GITHUB_WORKSPACE} -name "*.sh" -type f | head -20
           exit 1
         fi
 
     - name: 加载自定义 feeds
       env:
         FEEDS_CONF_PATH: ${{ env.ARCHITECTURE }}/${{ env.FEEDS_CONF }}
+      working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
-        [ -e $FEEDS_CONF_PATH ] && mv $FEEDS_CONF_PATH openwrt/$FEEDS_CONF
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        echo "当前工作目录: $(pwd)"
+        [ -e $FEEDS_CONF_PATH ] && mv $FEEDS_CONF_PATH ${{ env.FEEDS_CONF }}
+        chmod +x ${{ github.workspace }}/${{ env.DIY_P1_SH }}
+        ${{ github.workspace }}/${{ env.DIY_P1_SH }}
 
     - name: 更新 feeds（第1遍）
-      run: cd openwrt && ./scripts/feeds update -a
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: ./scripts/feeds update -a
 
     - name: 更新 feeds（第2遍）
-      run: cd openwrt && ./scripts/feeds update -a
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: ./scripts/feeds update -a
 
     - name: 安装 feeds（第1遍）
-      run: cd openwrt && ./scripts/feeds install -a
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: ./scripts/feeds install -a
 
     - name: 安装 feeds（第2遍）
-      run: cd openwrt && ./scripts/feeds install -a
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: ./scripts/feeds install -a
 
     - name: 加载自定义配置
       env:
         CONFIG_FILE_PATH: ${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
+      working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE_PATH ] && mv $CONFIG_FILE_PATH openwrt/$CONFIG_FILE
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        echo "当前工作目录: $(pwd)"
+        [ -e files ] && mv files ${{ github.workspace }}/files
+        [ -e $CONFIG_FILE_PATH ] && mv $CONFIG_FILE_PATH ${{ env.CONFIG_FILE }}
+        chmod +x ${{ github.workspace }}/${{ env.DIY_P2_SH }}
+        ${{ github.workspace }}/${{ env.DIY_P2_SH }}
 
     - name: 下载软件包（第1遍）
       id: package1
+      working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
-        cd openwrt
         make defconfig
         make download -j8 --no-cache  # 禁用下载缓存
         find dl -size -1024c -exec ls -l {} \;
@@ -153,18 +175,30 @@ jobs:
 
     - name: 下载软件包（第2遍）
       id: package2
+      working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
-        cd openwrt
         make download -j8 --no-cache
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
     - name: 编译固件
       id: compile
+      working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
-        cd openwrt
+        echo "当前工作目录: $(pwd)"
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
+        
+        # 调试信息：检查固件目录结构
+        echo "编译完成，检查固件目录:"
+        find bin -type f -name "*.bin" -o -name "*.img" -o -name "*.gz" 2>/dev/null | head -20 || true
+        echo "bin目录结构:"
+        ls -la bin/ || true
+        if [ -d "bin/targets" ]; then
+          echo "targets目录结构:"
+          find bin/targets -type d 2>/dev/null | head -20 || true
+        fi
+        
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
         echo "status=success" >> ${GITHUB_OUTPUT}
 
@@ -177,15 +211,48 @@ jobs:
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.FILE_DATE }}
-        path: openwrt/bin
+        path: ${{ env.WORKDIR }}/openwrt/bin
 
     - name: 整理固件文件
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages
+        echo "当前工作目录: $(pwd)"
+        
+        # 查找固件目录
+        if [ -d "bin/targets/rockchip/armv8" ]; then
+          echo "找到固定路径: bin/targets/rockchip/armv8"
+          FIRMWARE_DIR="bin/targets/rockchip/armv8"
+        else
+          # 使用通配符查找
+          TARGET_DIRS=($(find bin/targets -maxdepth 2 -mindepth 2 -type d ! -name "packages" 2>/dev/null))
+          if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
+            echo "找到通配符路径: ${TARGET_DIRS[0]}"
+            FIRMWARE_DIR="${TARGET_DIRS[0]}"
+          else
+            echo "错误：未找到固件输出目录"
+            echo "当前目录结构:"
+            ls -la
+            echo "bin目录结构:"
+            find bin -type d 2>/dev/null | head -20
+            exit 1
+          fi
+        fi
+        
+        cd "$FIRMWARE_DIR"
+        echo "已进入固件目录: $(pwd)"
+        echo "目录内容:"
+        ls -la || true
+        
+        # 删除packages目录
+        if [ -d "packages" ]; then
+          rm -rf packages
+          echo "已删除packages目录"
+        fi
+        
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "FIRMWARE_FILES=$(ls *.bin *.img *.gz 2>/dev/null | wc -l)" >> $GITHUB_ENV
         echo "status=success" >> ${GITHUB_OUTPUT}
 
     - name: 上传固件目录

@@ -7,7 +7,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # 设备文件源目录 = 脚本所在目录（dts/defconfig/dtsi 与脚本同目录）
 DEVICE_FILES_DIR="${SCRIPT_DIR}"
 # 源码根目录 = 脚本目录的上级目录（假设 xiguapi-v3/ 放在 OpenWrt/iStoreOS 源码根目录下）
-SOURCE_ROOT_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
+SOURCE_ROOT_DIR=$(cd "${SCRIPT_DIR}/../openwrt" && pwd)
 
 # ===================== 设备固定配置 =====================
 DEVICE_NAME="xiguapi-v3"

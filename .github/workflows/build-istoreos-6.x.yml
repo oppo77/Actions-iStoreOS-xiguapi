@@ -84,7 +84,7 @@ jobs:
           openjdk-11-jre-headless
         
         echo "------------------------------- Python工具安装 -------------------------------"
-        sudo pip3 install pyelftools setuptools yaml --no-cache-dir  # 禁用缓存，节省空间
+        sudo pip3 install pyelftools setuptools pyyaml --no-cache-dir  # 禁用缓存，节省空间
         
         echo "------------------------------- 最终磁盘检查 -------------------------------"
         df -Th

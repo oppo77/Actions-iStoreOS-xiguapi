@@ -100,18 +100,6 @@ copy_device_files() {
 modify_armv8_mk() {
     info "===== 3. 修改armv8.mk ====="
     local armv8_mk="target/linux/rockchip/image/armv8.mk"
-    
-    # 备份原文件
-    if [ ! -f "${armv8_mk}.bak.xiguapi" ]; then
-        cp -f "$armv8_mk" "${armv8_mk}.bak.xiguapi" || error "备份armv8.mk失败"
-        info "备份armv8.mk: ${armv8_mk}.bak.xiguapi"
-    fi
-
-    # 检查是否已存在设备定义
-    if grep -q "define Device/${DEVICE_DEF}" "$armv8_mk"; then
-        warn "设备定义 ${DEVICE_DEF} 已存在，跳过"
-        return
-    fi
 
     # 添加设备定义
     cat >> "$armv8_mk" << EOF

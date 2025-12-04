@@ -6,7 +6,7 @@ set -euo pipefail  # 严格模式，出错立即退出
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # 设备文件源目录 = 脚本所在目录（dts/defconfig/dtsi 与脚本同目录）
 DEVICE_FILES_DIR="${SCRIPT_DIR}"
-# 源码根目录 = 脚本目录的上级目录（假设 xiguapi-v3/ 放在 OpenWrt/iStoreOS 源码根目录下）
+# 源码根目录 = 脚本目录的上级目录的openwrt子目录（修正路径）
 SOURCE_ROOT_DIR=$(cd "${SCRIPT_DIR}/../openwrt" && pwd)
 
 # ===================== 设备固定配置 =====================
@@ -173,24 +173,17 @@ EOF
         info "已添加 ${uboot_def} 定义到uboot Makefile"
     fi
 
-    # 4.2 在UBOOT_TARGETS列表中添加xiguapi-v3-rk3568
+    # 4.2 在UBOOT_TARGETS列表中添加xiguapi-v3-rk3568（修复sed语法）
     if grep -q " ${DEVICE_NAME}-${SOC} " "$uboot_makefile"; then
         warn "UBOOT_TARGETS 中已包含 ${DEVICE_NAME}-${SOC}，跳过添加"
     else
-        # 兼容单行/多行UBOOT_TARGETS格式
-        sed -i "/^UBOOT_TARGETS :=/ {
-            /\\\$/! s/$/ \\\\/
-            a \ \ ${DEVICE_NAME}-${SOC} \\
-        }" "$uboot_makefile"
-        # 清理最后一行多余的反斜杠
-        sed -i "/^UBOOT_TARGETS :=/ {
-            :loop
-            n
-            /^[^ \t]/! {
-                s/\\\$//
-                b loop
-            }
-        }" "$uboot_makefile"
+        # 修复：使用单行sed命令替换多行块，避免语法错误
+        # 1. 为UBOOT_TARGETS行添加反斜杠（如果没有）
+        sed -i '/^UBOOT_TARGETS :=/ s/[^\\]$/& \\/' "$uboot_makefile"
+        # 2. 在UBOOT_TARGETS行下方追加新目标
+        sed -i "/^UBOOT_TARGETS :=/ a \  ${DEVICE_NAME}-${SOC}" "$uboot_makefile"
+        # 3. 清理最后一行多余的反斜杠
+        sed -i ':a; /\\$/ { N; ba; }; s/\\$//' "$uboot_makefile"
         info "已在UBOOT_TARGETS中添加 ${DEVICE_NAME}-${SOC}"
     fi
 }

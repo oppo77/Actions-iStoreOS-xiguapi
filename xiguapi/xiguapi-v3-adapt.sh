@@ -81,8 +81,9 @@ modify_armv8_mk() {
     local armv8_mk="target/linux/rockchip/image/armv8.mk"
     local device_tag="nlnet_xiguapi-v3"
     local device_comment="# Added for Xiguapi V3 (rk3568)"
-    # 定义要插入的内容（移除开头空行，避免多余换行）
-    local insert_content="${device_comment}
+    # 定义要插入的内容（无转义，直接写入临时文件）
+    local insert_content="
+${device_comment}
 define Device/${device_tag}
   DEVICE_VENDOR := NLNET
   DEVICE_MODEL := Xiguapi V3
@@ -94,7 +95,8 @@ define Device/${device_tag}
   BOOT_SCRIPT := rockchip
   DEVICE_PACKAGES := kmod-r8169
 endef
-TARGET_DEVICES += ${device_tag}"
+TARGET_DEVICES += ${device_tag}
+"
 
     # 前置检查：文件是否存在且可写
     if [ ! -f "$armv8_mk" ]; then
@@ -112,30 +114,33 @@ TARGET_DEVICES += ${device_tag}"
         return 1
     fi
 
-    # 修复点1：简化删除原有配置的sed逻辑（避免复杂标签）
-    sed -i.bak -E '/^[[:space:]]*'"${device_comment}"'/ {
-        :loop
-        N
-        /TARGET_DEVICES \+\+ '"${device_tag}"'/!b loop
-        d
+    # 修复点1：极简删除原有配置（避免复杂sed语法）
+    # 直接匹配注释到TARGET_DEVICES的块，强制删除
+    sed -i.bak '/^[[:space:]]*'"${device_comment}"'/ {
+        N;N;N;N;N;N;N;N;N;N;
+        /TARGET_DEVICES \+\+ '"${device_tag}"'/d
     }' "$armv8_mk"
-    # 删除sed生成的备份文件
     rm -f "${armv8_mk}.bak"
 
-    # 修复点2：正确处理多行插入（转义换行符，适配GNU sed）
+    # 修复点2：用临时文件插入多行内容（彻底规避命令行转义）
+    local tmp_file=$(mktemp)
+    echo -n "${insert_content}" > "$tmp_file"
+    
+    # 关键：用sed的r命令读取临时文件插入到include legacy.mk之前
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        # macOS/BSD sed 多行插入（逐行转义）
-        printf "%s" "${insert_content}" | sed -e 's/\\/\\\\/g' -e 's/$/\\/' | \
-            sed -i '' -e "/^include legacy\.mk$/e cat /dev/stdin" "$armv8_mk"
+        # macOS/BSD sed
+        sed -i '' "/^include legacy\.mk$/e cat $tmp_file" "$armv8_mk"
     else
-        # Linux GNU sed 多行插入（转义换行符）
-        escaped_insert=$(printf '%s' "${insert_content}" | sed -e 's/[\/&]/\\&/g' -e 's/\n/\\n/g')
-        sed -i -r "/^include legacy\.mk$/i ${escaped_insert}" "$armv8_mk"
+        # Linux GNU sed（最可靠的插入方式）
+        sed -i "/^include legacy\.mk$/r $tmp_file" "$armv8_mk"
     fi
+    
+    # 删除临时文件
+    rm -f "$tmp_file"
 
     # 验证插入结果
     if grep -q "${device_tag}" "$armv8_mk" && 
-       grep -B100 "include legacy\.mk" "$armv8_mk" | grep -q "${device_tag}"; then
+       grep -B100 "include legacy.mk" "$armv8_mk" | grep -q "${device_tag}"; then
         info "✓ ${device_tag} 已插入到armv8.mk正确位置（include legacy.mk之前）"
     else
         error "armv8.mk配置插入失败！请手动检查文件：${armv8_mk}"
@@ -144,7 +149,6 @@ TARGET_DEVICES += ${device_tag}"
 
     return 0
 }
-
 modify_uboot_makefile() {
     info "===== 4. 修改uboot-rockchip Makefile ====="
     local uboot_make="package/boot/uboot-rockchip/Makefile"

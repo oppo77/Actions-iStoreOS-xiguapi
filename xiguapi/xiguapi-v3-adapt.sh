@@ -72,8 +72,8 @@ copy_device_files() {
     copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
     # U-Boot defconfig（package/boot/uboot-rockchip/src/configs/需提前存在）
     copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3_defconfig" "package/boot/uboot-rockchip/src/configs/rk3568-xiguapi-v3_defconfig"
-    # U-Boot dtsi（package/boot/uboot-rockchip/src/arch/arm/dts/rk3568/需提前存在）
-    copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3-u-boot.dtsi" "package/boot/uboot-rockchip/src/arch/arm/dts/rk3568/rk3568-xiguapi-v3-u-boot.dtsi"
+    # U-Boot dtsi（package/boot/uboot-rockchip/src/arch/arm/dts/需提前存在）
+    copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3-u-boot.dtsi" "package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
 }
 
 modify_armv8_mk() {

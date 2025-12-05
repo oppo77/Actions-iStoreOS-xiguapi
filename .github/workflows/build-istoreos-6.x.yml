@@ -155,20 +155,21 @@ jobs:
 
     - name: 加载自定义配置
       env:
-        CONFIG_FILE_PATH: ${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
+        # 核心修复：指向仓库根目录的 armv8/.config（绝对路径）
+        CONFIG_FILE_PATH: ${{ github.workspace }}/${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
         echo "当前工作目录: $(pwd)"
         # 修复1：备份 files 目录（如果存在）
         [ -d "files" ] && mv files ${{ github.workspace }}/files && echo "✅ 备份 files 目录完成"
         
-        # 修复2：验证配置文件是否存在，不存在则报错
+        # 修复2：验证配置文件是否存在（核心修复）
         if [ -e "$CONFIG_FILE_PATH" ]; then
-          mv "$CONFIG_FILE_PATH" "${{ env.CONFIG_FILE }}"
+          cp "$CONFIG_FILE_PATH" "${{ env.CONFIG_FILE }}"
           echo "✅ 加载自定义配置文件: $CONFIG_FILE_PATH"
         else
           echo "❌ 自定义配置文件不存在: $CONFIG_FILE_PATH"
-          echo "当前目录下的文件: $(ls -la ${{ github.workspace }}/${{ env.ARCHITECTURE }}/ 2>/dev/null || true)"
+          echo "当前仓库根目录下的 armv8 目录内容: $(ls -la ${{ github.workspace }}/${{ env.ARCHITECTURE }}/ 2>/dev/null || true)"
           exit 1
         fi
         

@@ -40,7 +40,7 @@ error() {
         echo -e "\033[31m[DEBUG] 01_leds 文件内容片段：\033[0m"
         grep -A10 -B2 "${BOARD_FULL_NAME//,/\\,}" "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds" || true
     fi
-    exit 1
+    exit 1;
 }
 
 ensure_dir() {
@@ -132,17 +132,7 @@ copy_device_files() {
         fi
     done
 
-    # 修复：自动在DTS文件中添加U-Boot dtsi引用
-    if [ -f "$dts_dest" ]; then
-        local uboot_dtsi_include="#include \"rk3568-xiguapi-v3-u-boot.dtsi\""
-        if ! grep -q "$uboot_dtsi_include" "$dts_dest"; then
-            # 在/dts-v1/; 后插入引用（符合DTS规范）
-            sed -i "/^\/dts-v1\/;/a \\$uboot_dtsi_include" "$dts_dest"
-            info "已在DTS文件中添加U-Boot dtsi引用: $dts_dest"
-        else
-            info "✓ DTS文件已包含U-Boot dtsi引用"
-        fi
-    fi
+    # 【移除】自动添加U-Boot dtsi引用的逻辑，保留设备树未关联的警告
 }
 
 modify_armv8_mk() {
@@ -405,13 +395,13 @@ verify_changes() {
         info "✓ U-Boot dtsi 文件验证通过"
     fi
 
-    # 4. 验证U-Boot与设备树关联
+    # 4. 验证U-Boot与设备树关联（仅保留警告，不做修复）
     if [ -f "$dts_file" ]; then
         if grep -q "rk3568-xiguapi-v3-u-boot" "$dts_file"; then
             info "✓ 设备树文件正确引用了U-Boot dtsi"
         else
             warn "设备树文件未关联U-Boot：$dts_file 中未找到 rk3568-xiguapi-v3-u-boot 引用"
-            # 这不算致命错误，只是警告
+            # 保留警告，不修改error_count
         fi
     fi
 

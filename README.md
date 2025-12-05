@@ -49,15 +49,6 @@
 
 ---
 
-## 📁 设备与固件对应表
-
-### RK35xx 架构
-
-| 设备 | 固件文件 |
-| :--- | :--- |
-| **nlnet_xiguapi-v3** | `istoreos-rockchip-rk35xx-nlnet_xiguapi-v3-squashfs-combined.img.gz` |
-
----
 
 ## 🙏 鸣谢
 

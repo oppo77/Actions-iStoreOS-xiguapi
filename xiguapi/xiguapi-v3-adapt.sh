@@ -249,7 +249,7 @@ verify_changes() {
     local device_files=(
         "target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
         "package/boot/uboot-rockchip/src/configs/rk3568-xiguapi-v3_defconfig"
-        "package/boot/uboot-rockchip/src/arch/arm/dts/rk3568/rk3568-xiguapi-v3-u-boot.dtsi"
+        "package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
     )
     for file in "${device_files[@]}"; do
         if [ ! -f "$file" ] || [ ! -s "$file" ]; then

@@ -1,10 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-# ===================== 核心配置 =====================
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-DEVICE_FILES_DIR="${SCRIPT_DIR}/xiguapi"  # 适配你的设备文件路径
-OPENWRT_ROOT="${OPENWRT_ROOT:-${SCRIPT_DIR}/../openwrt}"
+# ===================== 核心配置（关键修复：路径）=====================
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)  # 脚本所在目录：Actions-iStoreOS-xiguapi/xiguapi/
+DEVICE_FILES_DIR="${SCRIPT_DIR}"  # 设备文件和脚本同目录，无需额外拼接xiguapi
+OPENWRT_ROOT="${OPENWRT_ROOT:-${SCRIPT_DIR}/../workdir/openwrt}"  # 适配OpenWRT实际路径
 SOURCE_ROOT_DIR=$(cd "${OPENWRT_ROOT}" && pwd) || { 
     echo "ERROR: 未找到OpenWRT源码目录！"; exit 1; 
 }
@@ -27,6 +27,10 @@ error() {
         echo -e "\033[31m[DEBUG] 错误位置上下文：\033[0m"
         grep -A10 -B10 "UBOOT_TARGETS" "$uboot_make" || true
     }
+    # 额外输出路径调试信息
+    echo -e "\033[31m[DEBUG] 脚本目录：${SCRIPT_DIR}\033[0m"
+    echo -e "\033[31m[DEBUG] 设备文件目录：${DEVICE_FILES_DIR}\033[0m"
+    echo -e "\033[31m[DEBUG] OpenWRT目录：${SOURCE_ROOT_DIR}\033[0m"
     exit 1
 }
 
@@ -47,6 +51,12 @@ init_check() {
         "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3_defconfig"
         "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3-u-boot.dtsi"
     )
+    # 输出待检查的文件路径（调试）
+    info "待检查的设备文件路径："
+    for file in "${required_files[@]}"; do
+        echo " - $file"
+    done
+    # 检查文件是否存在
     for file in "${required_files[@]}"; do
         [ -f "$file" ] || error "必需文件缺失: $file"
     done
@@ -64,7 +74,7 @@ copy_device_files() {
     info "===== 2. 复制设备文件 ====="
     local dts_dest="${SOURCE_ROOT_DIR}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
     local defconfig_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/configs/${UBOOT_CONFIG}_defconfig"
-    local dtsi_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
+    local dtsi_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568/rk3568-xiguapi-v3-u-boot.dtsi"
 
     # 直接复制（覆盖原有文件）
     copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "$dts_dest"
@@ -229,7 +239,7 @@ verify_changes() {
 
     # 4. 验证U-Boot文件
     local defconfig="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/configs/${UBOOT_CONFIG}_defconfig"
-    local dtsi="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
+    local dtsi="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568/rk3568-xiguapi-v3-u-boot.dtsi"
     if [ ! -f "$defconfig" ] || [ ! -s "$defconfig" ]; then
         warn "U-Boot defconfig 缺失/为空"
         error_count=$((error_count+1))

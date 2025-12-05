@@ -66,62 +66,70 @@ copy_file() {
     info "复制文件: $src -> $dest"
 }
 
-# 简化的文本插入函数，避免复杂的sed语法
-insert_after_pattern() {
+# 简单但可靠的插入函数 - 直接追加在指定位置
+append_config_simple() {
     local file="$1"
-    local pattern="$2"
-    local content="$3"
+    local search_pattern="$2"
+    local config_content="$3"
+    local insert_after="$4"  # "before" 或 "after"
     
-    # 使用awk在匹配行后插入内容
-    awk -v pattern="$pattern" -v content="$content" '
-        $0 ~ pattern {
-            print $0
-            print content
-            next
-        }
-        { print }
-    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
-}
-
-# 在case语句的某个case后插入新case
-insert_case() {
-    local file="$1"
-    local pattern="$2"
-    local case_content="$3"
+    # 检查文件是否存在
+    if [ ! -f "$file" ]; then
+        error "配置文件不存在: $file"
+    fi
     
-    # 先转义pattern中的特殊字符
-    local escaped_pattern=$(echo "$pattern" | sed 's/[][\.*^$(){}?+|]/\\&/g')
+    # 检查是否已存在
+    local escaped_board_name="${BOARD_FULL_NAME//,/\\,}"
+    if grep -q "${escaped_board_name}" "$file"; then
+        warn "配置已存在于 $file，跳过"
+        return 0
+    fi
     
-    # 使用awk在匹配的case后插入新case
-    awk -v pattern="$escaped_pattern" -v new_case="$case_content" '
-        BEGIN { found = 0; inserted = 0 }
-        found && /^[[:space:]]*;;/ && !inserted {
-            print $0
-            print new_case
-            inserted = 1
-            found = 0
-            next
-        }
-        $0 ~ pattern { found = 1 }
-        { print }
-    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
-}
-
-# 在函数中的默认case前插入配置
-insert_before_default_case() {
-    local file="$1"
-    local func_name="$2"
-    local case_content="$3"
+    # 创建临时文件
+    local tmp_file=$(mktemp)
     
-    # 使用awk找到函数并在默认case(*)前插入
-    awk -v func="$func_name" -v new_case="$case_content" '
-        $0 ~ func { in_func = 1 }
-        in_func && /^[[:space:]]*\*)/ {
-            print new_case
-            in_func = 0
-        }
-        { print }
-    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+    # 根据插入位置处理
+    if [ "$insert_after" = "after" ]; then
+        # 在匹配行后插入
+        awk -v pattern="$search_pattern" -v content="$config_content" '
+            $0 ~ pattern {
+                print $0
+                print content
+                found = 1
+                next
+            }
+            { print }
+            END {
+                if (!found) {
+                    # 如果没有找到匹配行，将内容添加到文件末尾
+                    print content
+                }
+            }
+        ' "$file" > "$tmp_file"
+    else
+        # 在匹配行前插入（默认）
+        awk -v pattern="$search_pattern" -v content="$config_content" '
+            $0 ~ pattern {
+                print content
+                found = 1
+            }
+            { print }
+            END {
+                if (!found) {
+                    # 如果没有找到匹配行，将内容添加到文件末尾
+                    print content
+                }
+            }
+        ' "$file" > "$tmp_file"
+    fi
+    
+    # 替换原文件
+    mv "$tmp_file" "$file" || {
+        rm -f "$tmp_file"
+        error "插入配置失败: $file"
+    }
+    
+    info "✓ 已添加配置到 $file"
 }
 
 # ===================== 核心操作函数 =====================
@@ -268,23 +276,22 @@ modify_device_configs() {
         error "LED配置文件不存在: $leds_file。请确保OpenWRT源码完整"
     fi
 
-    # 转义BOARD_FULL_NAME中的逗号（避免awk匹配错误）
-    local escaped_board_name="${BOARD_FULL_NAME//,/\\,}"
-    
-    if ! grep -q "${escaped_board_name}" "$leds_file"; then
+    # 检查是否已存在
+    if grep -q "${BOARD_FULL_NAME//,/\\,}" "$leds_file"; then
+        warn "${DEVICE_NAME} LED配置已存在，跳过"
+    else
         # 在最后一个非通配符case后插入我们的配置
-        local leds_case="${BOARD_FULL_NAME})
+        local leds_config="${BOARD_FULL_NAME})
 	ucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"
 	ucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"
 	ucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"
 	;;"
         
-        # 在radxa,e54c的case后插入我们的配置
-        insert_case "$leds_file" "radxa,e54c)" "$leds_case"
+        # 在esac行前插入
+        sed -i "/^esac\$/i\\
+${leds_config}" "$leds_file"
         
         info "已添加 ${DEVICE_NAME} LED配置"
-    else
-        warn "${DEVICE_NAME} LED配置已存在，跳过"
     fi
 
     # 修改02_network配置
@@ -295,28 +302,28 @@ modify_device_configs() {
         error "网络配置文件不存在: $network_file。请确保OpenWRT源码完整"
     fi
 
-    if ! grep -q "${escaped_board_name}" "$network_file"; then
-        # 接口配置
-        local network_iface_case="${BOARD_FULL_NAME})
+    # 接口配置
+    local network_iface_config="${BOARD_FULL_NAME})
 	ucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"
 	;;"
-        
-        # 在rockchip_setup_interfaces函数的默认case前插入
-        insert_before_default_case "$network_file" "rockchip_setup_interfaces" "$network_iface_case"
-        
-        # MAC地址配置
-        local network_mac_case="${BOARD_FULL_NAME})
+    
+    # 在rockchip_setup_interfaces函数的默认case前插入
+    sed -i "/^[[:space:]]*\*)/i\\
+${network_iface_config}" "$network_file"
+    
+    # MAC地址配置
+    local network_mac_config="${BOARD_FULL_NAME})
 	wan_mac=\$(generate_mac_from_boot_mmc)
 	lan_mac=\$(macaddr_add \"\$wan_mac\" 1)
 	;;"
-        
-        # 在rockchip_setup_macs函数的默认case前插入
-        insert_before_default_case "$network_file" "rockchip_setup_macs" "$network_mac_case"
-        
-        info "已添加 ${DEVICE_NAME} 网络配置"
-    else
-        warn "${DEVICE_NAME} 网络配置已存在，跳过"
-    fi
+    
+    # 在rockchip_setup_macs函数的默认case前插入
+    sed -i "/rockchip_setup_macs/,/^[[:space:]]*\*)/ {
+        /^[[:space:]]*\*)/i\\
+${network_mac_config}
+    }" "$network_file"
+    
+    info "已添加 ${DEVICE_NAME} 网络配置"
 
     # 修改init.sh配置
     local init_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
@@ -326,28 +333,30 @@ modify_device_configs() {
         error "初始化配置文件不存在: $init_file。请确保OpenWRT源码完整"
     fi
 
-    if ! grep -q "${escaped_board_name}" "$init_file"; then
-        # 接口修复
-        local init_iface_case="${BOARD_FULL_NAME})
+    # 接口修复
+    local init_iface_config="${BOARD_FULL_NAME})
 	# No interface renaming needed
 	;;"
-        
-        # 在board_fixup_iface_name函数的默认case前插入
-        insert_before_default_case "$init_file" "board_fixup_iface_name" "$init_iface_case"
-        
-        # SMP亲和性
-        local init_smp_case="${BOARD_FULL_NAME})
+    
+    # 在board_fixup_iface_name函数的默认case前插入
+    sed -i "/board_fixup_iface_name/,/^[[:space:]]*\*)/ {
+        /^[[:space:]]*\*)/i\\
+${init_iface_config}
+    }" "$init_file"
+    
+    # SMP亲和性
+    local init_smp_config="${BOARD_FULL_NAME})
 	set_iface_cpumask 2 eth0
 	set_iface_cpumask 4 eth1
 	;;"
-        
-        # 在board_set_iface_smp_affinity函数的默认case前插入
-        insert_before_default_case "$init_file" "board_set_iface_smp_affinity" "$init_smp_case"
-        
-        info "已添加 ${DEVICE_NAME} 初始化配置"
-    else
-        warn "${DEVICE_NAME} 初始化配置已存在，跳过"
-    fi
+    
+    # 在board_set_iface_smp_affinity函数的默认case前插入
+    sed -i "/board_set_iface_smp_affinity/,/^[[:space:]]*\*)/ {
+        /^[[:space:]]*\*)/i\\
+${init_smp_config}
+    }" "$init_file"
+    
+    info "已添加 ${DEVICE_NAME} 初始化配置"
 }
 
 verify_changes() {

@@ -131,6 +131,18 @@ copy_device_files() {
             info "✓ U-Boot文件验证通过: $file"
         fi
     done
+
+    # 修复：自动在DTS文件中添加U-Boot dtsi引用
+    if [ -f "$dts_dest" ]; then
+        local uboot_dtsi_include="#include \"rk3568-xiguapi-v3-u-boot.dtsi\""
+        if ! grep -q "$uboot_dtsi_include" "$dts_dest"; then
+            # 在/dts-v1/; 后插入引用（符合DTS规范）
+            sed -i "/^\/dts-v1\/;/a \\$uboot_dtsi_include" "$dts_dest"
+            info "已在DTS文件中添加U-Boot dtsi引用: $dts_dest"
+        else
+            info "✓ DTS文件已包含U-Boot dtsi引用"
+        fi
+    fi
 }
 
 modify_armv8_mk() {
@@ -174,14 +186,15 @@ modify_uboot_makefile() {
     # 添加U-Boot定义（官方格式：设备名-soc）
     local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"
     if ! grep -q "$uboot_def" "$uboot_makefile"; then
+        # 修复：BUILD_DEVICES 正确格式（反斜杠+换行+Tab缩进）
         cat >> "$uboot_makefile" << EOF
 
 # Added for Xiguapi V3 (rk3568)
 define ${uboot_def}
   \$(U-Boot/rk3568/Default)  # 继承RK3568默认依赖/ATF/TPL配置
   NAME:=Xiguapi V3
-  BUILD_DEVICES:= \\
-    ${DEVICE_DEF}            # 对应armv8.mk中的DEVICE_DEF
+  BUILD_DEVICES := \\
+	${DEVICE_DEF}            # 对应armv8.mk中的DEVICE_DEF
 endef
 EOF
         info "已添加 ${uboot_def} 定义（继承RK3568默认配置）"
@@ -189,13 +202,14 @@ EOF
         warn "${uboot_def} 已存在，跳过"
     fi
 
-    # 添加到UBOOT_TARGETS
-    if ! grep -q "${DEVICE_NAME}-${SOC}" "$uboot_makefile"; then
-        # 找到UBOOT_TARGETS行，直接追加设备名
-        sed -i "/^UBOOT_TARGETS :=/ s/\$/ ${DEVICE_NAME}-${SOC}/" "$uboot_makefile"
-        info "已添加 ${DEVICE_NAME}-${SOC} 到 UBOOT_TARGETS"
+    # 修复：UBOOT_TARGETS 添加逻辑（兼容行首空格，精准匹配）
+    local target_device="${DEVICE_NAME}-${SOC}"
+    if ! grep -q "\\b${target_device}\\b" "$uboot_makefile"; then
+        # 匹配任意行首空格的UBOOT_TARGETS行，追加设备名
+        sed -i "/^[[:space:]]*UBOOT_TARGETS[[:space:]]*:=/ s/\$/ ${target_device}/" "$uboot_makefile"
+        info "已添加 ${target_device} 到 UBOOT_TARGETS"
     else
-        warn "${DEVICE_NAME}-${SOC} 已在UBOOT_TARGETS中，跳过"
+        warn "${target_device} 已在UBOOT_TARGETS中，跳过"
     fi
 }
 
@@ -358,7 +372,7 @@ verify_changes() {
         fi
 
         # 验证BUILD_DEVICES语法
-        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES.*${DEVICE_DEF}"; then
+        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES.*\\\\[[:space:]]*${DEVICE_DEF}"; then
             warn "U-Boot BUILD_DEVICES 语法错误：需包含反斜杠+缩进，且指向 ${DEVICE_DEF}"
             error_count=$((error_count+1))
         else

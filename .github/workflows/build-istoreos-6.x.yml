@@ -64,7 +64,6 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-
         echo "------------------------------- 仅更新源（跳过upgrade，避免占用空间） -------------------------------"
         # 关键：跳过apt upgrade（编译iStoreOS无需系统升级，仅需安装依赖）
         sudo apt update -y
@@ -152,8 +151,7 @@ jobs:
     - name: 安装 feeds（第2遍）
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: ./scripts/feeds install -a
-
-      sed -i '/luci-app-baidupcs-web/d' .config
+      # 修复：删除游离的 sed 命令，移到「加载自定义配置」步骤
 
     - name: 加载自定义配置
       env:
@@ -161,10 +159,55 @@ jobs:
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
         echo "当前工作目录: $(pwd)"
-        [ -e files ] && mv files ${{ github.workspace }}/files
-        [ -e $CONFIG_FILE_PATH ] && mv $CONFIG_FILE_PATH ${{ env.CONFIG_FILE }}
+        # 修复1：备份 files 目录（如果存在）
+        [ -d "files" ] && mv files ${{ github.workspace }}/files && echo "✅ 备份 files 目录完成"
+        
+        # 修复2：验证配置文件是否存在，不存在则报错
+        if [ -e "$CONFIG_FILE_PATH" ]; then
+          mv "$CONFIG_FILE_PATH" "${{ env.CONFIG_FILE }}"
+          echo "✅ 加载自定义配置文件: $CONFIG_FILE_PATH"
+        else
+          echo "❌ 自定义配置文件不存在: $CONFIG_FILE_PATH"
+          echo "当前目录下的文件: $(ls -la ${{ github.workspace }}/${{ env.ARCHITECTURE }}/ 2>/dev/null || true)"
+          exit 1
+        fi
+        
+        # 执行 diy-part2.sh 脚本
         chmod +x ${{ github.workspace }}/${{ env.DIY_P2_SH }}
         ${{ github.workspace }}/${{ env.DIY_P2_SH }}
+        echo "✅ 执行 diy-part2.sh 完成"
+        
+        # 修复3：将游离的 sed 命令移到此处，删除 luci-app-baidupcs-web
+        sed -i '/luci-app-baidupcs-web/d' .config
+        echo "✅ 移除 luci-app-baidupcs-web 配置完成"
+        
+        # 修复4：验证编译目标配置（核心！确保选中 rockchip/armv8，而非 ath79）
+        echo "===== 验证编译目标配置 ====="
+        # 检查是否选中 rockchip/armv8
+        if ! grep -q "CONFIG_TARGET_rockchip_armv8=y" .config; then
+          echo "❌ 错误：.config 中未选中 rockchip/armv8 目标"
+          echo "当前 .config 中的目标配置:"
+          grep -E "CONFIG_TARGET_(rockchip|ath79|ramips)" .config || true
+          exit 1
+        fi
+        
+        # 检查是否选中 xiguapi-v3 设备
+        if ! grep -q "CONFIG_TARGET_rockchip_armv8_DEVICE_nlnet_xiguapi-v3=y" .config; then
+          echo "❌ 错误：.config 中未选中 nlnet_xiguapi-v3 设备"
+          echo "当前已选中的 rockchip 设备:"
+          grep -E "CONFIG_TARGET_rockchip_armv8_DEVICE_" .config || true
+          exit 1
+        fi
+        
+        # 检查是否未选中 ath79（避免编译默认 ath79 固件）
+        if grep -q "CONFIG_TARGET_ath79=y" .config; then
+          echo "❌ 错误：.config 中仍选中了 ath79 目标，需禁用"
+          sed -i '/CONFIG_TARGET_ath79=y/d' .config
+          sed -i 's/CONFIG_TARGET_ath79=.*/# CONFIG_TARGET_ath79 is not set/' .config
+          echo "✅ 已禁用 ath79 目标"
+        fi
+        
+        echo "===== 编译目标配置验证通过 ====="
 
     - name: 下载软件包（第1遍）
       id: package1

@@ -66,72 +66,6 @@ copy_file() {
     info "复制文件: $src -> $dest"
 }
 
-# 简单但可靠的插入函数 - 直接追加在指定位置
-append_config_simple() {
-    local file="$1"
-    local search_pattern="$2"
-    local config_content="$3"
-    local insert_after="$4"  # "before" 或 "after"
-    
-    # 检查文件是否存在
-    if [ ! -f "$file" ]; then
-        error "配置文件不存在: $file"
-    fi
-    
-    # 检查是否已存在
-    local escaped_board_name="${BOARD_FULL_NAME//,/\\,}"
-    if grep -q "${escaped_board_name}" "$file"; then
-        warn "配置已存在于 $file，跳过"
-        return 0
-    fi
-    
-    # 创建临时文件
-    local tmp_file=$(mktemp)
-    
-    # 根据插入位置处理
-    if [ "$insert_after" = "after" ]; then
-        # 在匹配行后插入
-        awk -v pattern="$search_pattern" -v content="$config_content" '
-            $0 ~ pattern {
-                print $0
-                print content
-                found = 1
-                next
-            }
-            { print }
-            END {
-                if (!found) {
-                    # 如果没有找到匹配行，将内容添加到文件末尾
-                    print content
-                }
-            }
-        ' "$file" > "$tmp_file"
-    else
-        # 在匹配行前插入（默认）
-        awk -v pattern="$search_pattern" -v content="$config_content" '
-            $0 ~ pattern {
-                print content
-                found = 1
-            }
-            { print }
-            END {
-                if (!found) {
-                    # 如果没有找到匹配行，将内容添加到文件末尾
-                    print content
-                }
-            }
-        ' "$file" > "$tmp_file"
-    fi
-    
-    # 替换原文件
-    mv "$tmp_file" "$file" || {
-        rm -f "$tmp_file"
-        error "插入配置失败: $file"
-    }
-    
-    info "✓ 已添加配置到 $file"
-}
-
 # ===================== 核心操作函数 =====================
 init_check() {
     info "===== 1. 初始化检查 ====="
@@ -268,10 +202,10 @@ EOF
 modify_device_configs() {
     info "===== 5. 修改设备配置文件 ====="
     
-    # 修复01_leds配置（核心修复部分）
+    # 修复01_leds配置
     local leds_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
     
-    # 检查文件是否存在，如果不存在则报错而不是创建空文件
+    # 检查文件是否存在
     if [ ! -f "$leds_file" ]; then
         error "LED配置文件不存在: $leds_file。请确保OpenWRT源码完整"
     fi
@@ -280,16 +214,21 @@ modify_device_configs() {
     if grep -q "${BOARD_FULL_NAME//,/\\,}" "$leds_file"; then
         warn "${DEVICE_NAME} LED配置已存在，跳过"
     else
-        # 在最后一个非通配符case后插入我们的配置
+        # 在esac行前插入（简单可靠的方法）
         local leds_config="${BOARD_FULL_NAME})
 	ucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"
 	ucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"
 	ucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"
 	;;"
         
-        # 在esac行前插入
-        sed -i "/^esac\$/i\\
-${leds_config}" "$leds_file"
+        # 使用临时文件确保插入正确
+        local tmp_file=$(mktemp)
+        awk -v config="$leds_config" '
+            /^esac$/ {
+                print config
+            }
+            { print }
+        ' "$leds_file" > "$tmp_file" && mv "$tmp_file" "$leds_file"
         
         info "已添加 ${DEVICE_NAME} LED配置"
     fi
@@ -302,28 +241,43 @@ ${leds_config}" "$leds_file"
         error "网络配置文件不存在: $network_file。请确保OpenWRT源码完整"
     fi
 
-    # 接口配置
-    local network_iface_config="${BOARD_FULL_NAME})
+    # 检查是否已存在
+    if grep -q "${BOARD_FULL_NAME//,/\\,}" "$network_file"; then
+        warn "${DEVICE_NAME} 网络配置已存在，跳过"
+    else
+        # 接口配置 - 在rockchip_setup_interfaces函数的默认case前插入
+        local network_iface_config="${BOARD_FULL_NAME})
 	ucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"
 	;;"
-    
-    # 在rockchip_setup_interfaces函数的默认case前插入
-    sed -i "/^[[:space:]]*\*)/i\\
-${network_iface_config}" "$network_file"
-    
-    # MAC地址配置
-    local network_mac_config="${BOARD_FULL_NAME})
+        
+        local tmp_file=$(mktemp)
+        awk -v config="$network_iface_config" '
+            /rockchip_setup_interfaces\(\)/,/^\s*\*\)/ {
+                if (/^\s*\*\)/) {
+                    print config
+                }
+            }
+            { print }
+        ' "$network_file" > "$tmp_file" && mv "$tmp_file" "$network_file"
+        
+        # MAC地址配置 - 在rockchip_setup_macs函数的默认case前插入
+        local network_mac_config="${BOARD_FULL_NAME})
 	wan_mac=\$(generate_mac_from_boot_mmc)
 	lan_mac=\$(macaddr_add \"\$wan_mac\" 1)
 	;;"
-    
-    # 在rockchip_setup_macs函数的默认case前插入
-    sed -i "/rockchip_setup_macs/,/^[[:space:]]*\*)/ {
-        /^[[:space:]]*\*)/i\\
-${network_mac_config}
-    }" "$network_file"
-    
-    info "已添加 ${DEVICE_NAME} 网络配置"
+        
+        local tmp_file2=$(mktemp)
+        awk -v config="$network_mac_config" '
+            /rockchip_setup_macs\(\)/,/^\s*\*\)/ {
+                if (/^\s*\*\)/) {
+                    print config
+                }
+            }
+            { print }
+        ' "$network_file" > "$tmp_file2" && mv "$tmp_file2" "$network_file"
+        
+        info "已添加 ${DEVICE_NAME} 网络配置"
+    fi
 
     # 修改init.sh配置
     local init_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
@@ -333,30 +287,43 @@ ${network_mac_config}
         error "初始化配置文件不存在: $init_file。请确保OpenWRT源码完整"
     fi
 
-    # 接口修复
-    local init_iface_config="${BOARD_FULL_NAME})
+    # 检查是否已存在
+    if grep -q "${BOARD_FULL_NAME//,/\\,}" "$init_file"; then
+        warn "${DEVICE_NAME} 初始化配置已存在，跳过"
+    else
+        # 接口修复 - 在board_fixup_iface_name函数的默认case前插入
+        local init_iface_config="${BOARD_FULL_NAME})
 	# No interface renaming needed
 	;;"
-    
-    # 在board_fixup_iface_name函数的默认case前插入
-    sed -i "/board_fixup_iface_name/,/^[[:space:]]*\*)/ {
-        /^[[:space:]]*\*)/i\\
-${init_iface_config}
-    }" "$init_file"
-    
-    # SMP亲和性
-    local init_smp_config="${BOARD_FULL_NAME})
+        
+        local tmp_file=$(mktemp)
+        awk -v config="$init_iface_config" '
+            /board_fixup_iface_name\(\)/,/^\s*\*\)/ {
+                if (/^\s*\*\)/) {
+                    print config
+                }
+            }
+            { print }
+        ' "$init_file" > "$tmp_file" && mv "$tmp_file" "$init_file"
+        
+        # SMP亲和性 - 在board_set_iface_smp_affinity函数的默认case前插入
+        local init_smp_config="${BOARD_FULL_NAME})
 	set_iface_cpumask 2 eth0
 	set_iface_cpumask 4 eth1
 	;;"
-    
-    # 在board_set_iface_smp_affinity函数的默认case前插入
-    sed -i "/board_set_iface_smp_affinity/,/^[[:space:]]*\*)/ {
-        /^[[:space:]]*\*)/i\\
-${init_smp_config}
-    }" "$init_file"
-    
-    info "已添加 ${DEVICE_NAME} 初始化配置"
+        
+        local tmp_file2=$(mktemp)
+        awk -v config="$init_smp_config" '
+            /board_set_iface_smp_affinity\(\)/,/^\s*\*\)/ {
+                if (/^\s*\*\)/) {
+                    print config
+                }
+            }
+            { print }
+        ' "$init_file" > "$tmp_file2" && mv "$tmp_file2" "$init_file"
+        
+        info "已添加 ${DEVICE_NAME} 初始化配置"
+    fi
 }
 
 verify_changes() {
@@ -424,7 +391,7 @@ verify_changes() {
         info "✓ U-Boot dtsi 文件验证通过"
     fi
 
-    # 4. 验证U-Boot与设备树关联（改为检查设备树是否正确引用了U-Boot dtsi）
+    # 4. 验证U-Boot与设备树关联
     if [ -f "$dts_file" ]; then
         if grep -q "rk3568-xiguapi-v3-u-boot" "$dts_file"; then
             info "✓ 设备树文件正确引用了U-Boot dtsi"

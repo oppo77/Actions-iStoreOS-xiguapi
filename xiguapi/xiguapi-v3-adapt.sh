@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-# 适配GitHub Actions工作流的Xiguapi V3设备适配脚本（修复sed/grep语法错误）
+# 适配GitHub Actions工作流的Xiguapi V3设备适配脚本（最终修复版）
 # 工作流中已export OPENWRT_ROOT=${WORKDIR}/openwrt
 
 # ====================== 1. 检查环境变量 ======================
@@ -67,8 +67,8 @@ else
     echo -e "⚠️ U-Boot/nlnet_xiguapi-v3定义块已存在，跳过"
 fi
 
-# 5.2 在easepi-rk3588 \前添加 rk3568-xiguapi-v3 \（修复grep/sed语法）
-local target_line="  rk3568-xiguapi-v3 \\"
+# 5.2 在easepi-rk3588 \前添加 rk3568-xiguapi-v3 \（修复local+grep/sed语法）
+target_line="  rk3568-xiguapi-v3 \\"  # 移除local，改为全局变量
 if ! safe_grep "${target_line}" "${UBOOT_MK}"; then
     # 改用换行符转义的sed语法，兼容Ubuntu 22.04
     sed -i '/easepi-rk3588 \\/i \  rk3568-xiguapi-v3 \\' "${UBOOT_MK}"
@@ -122,7 +122,7 @@ echo -e "✅ 已复制U-Boot设备树片段 -> ${UBOOT_DTSI_DEST}"
 
 # ====================== 8. 验证 ======================
 echo -e "\n【5/5】验证修改结果..."
-local verify_pass=0
+verify_pass=0  # 移除local，改为全局变量
 if safe_grep "rk3568-xiguapi-v3 \\" "${UBOOT_MK}" && safe_grep "U-Boot/nlnet_xiguapi-v3" "${UBOOT_MK}"; then
     echo -e "✅ UBOOT Makefile修改验证通过"
 else

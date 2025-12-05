@@ -21,6 +21,8 @@ DEVICE_DEF="nlnet_xiguapi-v3"
 UBOOT_CONFIG="rk3568-xiguapi-v3"
 # 统一board名称（匹配OpenWRT标准格式：厂商,设备名）
 BOARD_FULL_NAME="nlnet,${DEVICE_NAME}"
+# 网卡驱动可配置变量（按你的要求保留，未修改）
+NETWORK_DRIVER="kmod-r8169"
 
 # ===================== 工具函数 =====================
 info() {
@@ -90,6 +92,12 @@ init_check() {
     # 切换工作目录到源码根目录
     cd "${SOURCE_ROOT_DIR}" || error "无法进入源码根目录: ${SOURCE_ROOT_DIR}"
     info "当前工作目录: $(pwd)"
+
+    # 脚本执行权限检查（新增健壮性修复）
+    if [ ! -x "${BASH_SOURCE[0]}" ]; then
+        warn "脚本无执行权限，自动添加..."
+        chmod +x "${BASH_SOURCE[0]}" || error "添加执行权限失败"
+    fi
 }
 
 copy_device_files() {
@@ -105,8 +113,9 @@ copy_device_files() {
     local dtsi_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
     copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3-u-boot.dtsi" "$dtsi_dest"
 
-    local upstream_dts_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/dts/upstream/src/arm64/rockchip/rk3568-xiguapi-v3.dts"
-    copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "$upstream_dts_dest"
+    # 注释冗余的upstream_dts复制（避免不存在路径报错，非核心修改）
+    # local upstream_dts_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/dts/upstream/src/arm64/rockchip/rk3568-xiguapi-v3.dts"
+    # copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "$upstream_dts_dest"
 }
 
 modify_armv8_mk() {
@@ -123,7 +132,7 @@ modify_armv8_mk() {
         return
     fi
 
-    # 添加设备定义
+    # 添加设备定义（DEVICE_DTS_DIR按你的要求保留原路径，未修改）
     cat >> "$armv8_mk" << EOF
 
 # Added for Xiguapi V3 (rk3568)
@@ -136,7 +145,7 @@ define Device/${DEVICE_DEF}
   UBOOT_DEVICE_NAME := ${UBOOT_CONFIG}
   KERNEL_LOADADDR := 0x04000000
   BOOT_SCRIPT := rockchip
-  DEVICE_PACKAGES := kmod-r8169
+  DEVICE_PACKAGES := ${NETWORK_DRIVER}
 endef
 TARGET_DEVICES += ${DEVICE_DEF}
 EOF
@@ -153,7 +162,7 @@ modify_uboot_makefile() {
         info "备份uboot Makefile: ${uboot_makefile}.bak.xiguapi"
     fi
 
-    # 添加U-Boot定义 - 核心修复：继承RK3568默认配置（符合OpenWRT规范）
+    # 添加U-Boot定义 - 核心修复：BUILD_DEVICES语法错误（移除多余反斜杠）
     local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"
     if ! grep -q "$uboot_def" "$uboot_makefile"; then
         cat >> "$uboot_makefile" << EOF
@@ -163,8 +172,7 @@ define ${uboot_def}
   \$(U-Boot/rk3568/Default)  # 继承RK3568默认依赖/ATF/TPL配置
   NAME:=Xiguapi V3
   UBOOT_CONFIG:=${UBOOT_CONFIG}
-  BUILD_DEVICES:= \
-    ${DEVICE_DEF}
+  BUILD_DEVICES:= ${DEVICE_DEF}  # 修复：移除反斜杠，单行定义
 endef
 EOF
         info "已添加 ${uboot_def} 定义（继承RK3568默认配置）"
@@ -172,7 +180,7 @@ EOF
         warn "${uboot_def} 已存在，跳过"
     fi
 
-    # 添加到UBOOT_TARGETS - 修复sed语法，适配多环境
+    # 添加到UBOOT_TARGETS - 修复：注释移到行外，避免截断sed命令
     if ! grep -q "${DEVICE_NAME}-${SOC}" "$uboot_makefile"; then
         # 步骤1：给UBOOT_TARGETS行末尾加反斜杠（如果没有）
         sed -i -e "/^UBOOT_TARGETS :=/ { /\\$/! s/\$/ \\/; }" \
@@ -192,15 +200,19 @@ EOF
 modify_device_configs() {
     info "===== 5. 修改设备配置文件 ====="
     
-    # 修复01_leds配置（核心：变量替换+适配原有case结构）
+    # 修复01_leds配置：sed插入语法兼容GNU/BSD sed
     local leds_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
     ensure_dir "$(dirname "$leds_file")"
     [ ! -f "$leds_file" ] && touch "$leds_file" && info "创建空文件: $leds_file"
     [ ! -f "${leds_file}.bak.xiguapi" ] && cp -f "$leds_file" "${leds_file}.bak.xiguapi" && info "备份01_leds: ${leds_file}.bak.xiguapi"
 
     if ! grep -q "${BOARD_FULL_NAME}" "$leds_file"; then
-        # 用printf构造配置，确保变量正确替换
-        local leds_config=$(printf '%s' "${BOARD_FULL_NAME})\n\tucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"\n\tucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"\n\tucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"\n\t;;")
+        # 修复：用printf构造换行内容，兼容所有sed版本
+        local leds_config=$(printf '%s\n' "${BOARD_FULL_NAME})" \
+            "\tucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"" \
+            "\tucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"" \
+            "\tucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"" \
+            "\t;;")
         # 插入到esac上方（适配原有case缩进）
         sed -i -e "/^[[:space:]]*esac/i\\
 ${leds_config}
@@ -213,21 +225,26 @@ ${leds_config}
         warn "${DEVICE_NAME} LED配置已存在，跳过"
     fi
 
-    # 修改02_network配置（修复变量替换）
+    # 修改02_network配置（保留原有逻辑，仅修复sed插入兼容）
     local network_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
     ensure_dir "$(dirname "$network_file")"
     [ ! -f "$network_file" ] && touch "$network_file" && info "创建空文件: $network_file"
     [ ! -f "${network_file}.bak.xiguapi" ] && cp -f "$network_file" "${network_file}.bak.xiguapi"
 
     if ! grep -q "${BOARD_FULL_NAME}" "$network_file"; then
-        # 接口配置
-        local network_iface_config=$(printf '%s' "\t${BOARD_FULL_NAME})\n\t\tucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"\n\t\t;;")
+        # 接口配置 - 修复sed插入兼容
+        local network_iface_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
+            "\t\tucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"" \
+            "\t\t;;")
         sed -i -e "/rockchip_setup_interfaces()/,/^}/ { /^\s*\*)/i\\
 ${network_iface_config}
         }" "$network_file" || error "修改网络接口配置失败"
         
-        # MAC地址配置
-        local network_mac_config=$(printf '%s' "\t${BOARD_FULL_NAME})\n\t\twan_mac=\$(generate_mac_from_boot_mmc)\n\t\tlan_mac=\$(macaddr_add \"\$wan_mac\" 1)\n\t\t;;")
+        # MAC地址配置 - 修复sed插入兼容
+        local network_mac_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
+            "\t\twan_mac=\$(generate_mac_from_boot_mmc)" \
+            "\t\tlan_mac=\$(macaddr_add \"\$wan_mac\" 1)" \
+            "\t\t;;")
         sed -i -e "/rockchip_setup_macs()/,/^}/ { /^\s*\*)/i\\
 ${network_mac_config}
         }" "$network_file" || error "修改MAC配置失败"
@@ -236,21 +253,26 @@ ${network_mac_config}
         warn "${DEVICE_NAME} 网络配置已存在，跳过"
     fi
 
-    # 修改init.sh配置（修复变量替换）
+    # 修改init.sh配置（保留原有逻辑，仅修复sed插入兼容）
     local init_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
     ensure_dir "$(dirname "$init_file")"
     [ ! -f "$init_file" ] && touch "$init_file" && info "创建空文件: $init_file"
     [ ! -f "${init_file}.bak.xiguapi" ] && cp -f "$init_file" "${init_file}.bak.xiguapi"
 
     if ! grep -q "${BOARD_FULL_NAME}" "$init_file"; then
-        # 接口修复
-        local init_iface_config=$(printf '%s' "\t${BOARD_FULL_NAME})\n\t\t# No interface renaming needed\n\t\t;;")
+        # 接口修复 - 修复sed插入兼容
+        local init_iface_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
+            "\t\t# No interface renaming needed" \
+            "\t\t;;")
         sed -i -e "/board_fixup_iface_name()/,/^}/ { /^\s*\*)/i\\
 ${init_iface_config}
         }" "$init_file" || error "修改接口修复配置失败"
         
-        # SMP亲和性
-        local init_smp_config=$(printf '%s' "\t${BOARD_FULL_NAME})\n\t\tset_iface_cpumask 2 eth0\n\t\tset_iface_cpumask 4 eth1\n\t\t;;")
+        # SMP亲和性 - 修复sed插入兼容
+        local init_smp_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
+            "\t\tset_iface_cpumask 2 eth0" \
+            "\t\tset_iface_cpumask 4 eth1" \
+            "\t\t;;")
         sed -i -e "/board_set_iface_smp_affinity()/,/^}/ { /^\s*\*)/i\\
 ${init_smp_config}
         }" "$init_file" || error "修改SMP亲和性配置失败"
@@ -265,9 +287,10 @@ verify_changes() {
     local error_count=0
     local dts_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/dts/rk3568/${UBOOT_CONFIG}.dts"
 
+    # 修复：error改为warn，累加错误数（不再直接退出）
     # 验证设备定义
     if ! grep -q "define Device/${DEVICE_DEF}" "${SOURCE_ROOT_DIR}/target/linux/rockchip/image/armv8.mk"; then
-        error "armv8.mk 中未找到 ${DEVICE_DEF} 设备定义"
+        warn "armv8.mk 中未找到 ${DEVICE_DEF} 设备定义"
         error_count=$((error_count+1))
     else
         info "✓ armv8.mk 设备定义验证通过"
@@ -275,7 +298,7 @@ verify_changes() {
 
     # 验证UBOOT定义
     if ! grep -q "U-Boot/${DEVICE_NAME}-${SOC}" "${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"; then
-        error "uboot Makefile 中未找到 ${DEVICE_NAME}-${SOC} 定义"
+        warn "uboot Makefile 中未找到 ${DEVICE_NAME}-${SOC} 定义"
         error_count=$((error_count+1))
     else
         info "✓ uboot Makefile 定义验证通过"
@@ -283,13 +306,13 @@ verify_changes() {
 
     # 验证DTS文件
     if [ ! -f "$dts_file" ]; then
-        error "DTS文件不存在: $dts_file"
+        warn "DTS文件不存在: $dts_file"
         error_count=$((error_count+1))
     else
         if grep -q "xiguapi-v3" "$dts_file"; then
             info "✓ DTS文件存在且包含设备标识"
         else
-            error "DTS文件存在但不包含设备标识"
+            warn "DTS文件存在但不包含设备标识"
             error_count=$((error_count+1))
         fi
     fi
@@ -302,16 +325,17 @@ verify_changes() {
     )
     for file in "${check_files[@]}"; do
         if [ ! -f "$file" ]; then
-            error "配置文件不存在: $file"
+            warn "配置文件不存在: $file"
             error_count=$((error_count+1))
         elif ! grep -q "${BOARD_FULL_NAME}" "$file"; then
-            error "$file 中未找到 ${BOARD_FULL_NAME} 配置"
+            warn "$file 中未找到 ${BOARD_FULL_NAME} 配置"
             error_count=$((error_count+1))
         else
             info "✓ $file 配置验证通过"
         fi
     done
 
+    # 最后统一判断是否退出
     if [ $error_count -gt 0 ]; then
         error "共发现 ${error_count} 个验证错误，适配失败"
     else

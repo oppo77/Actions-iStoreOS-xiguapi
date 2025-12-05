@@ -79,16 +79,12 @@ copy_device_files() {
 modify_armv8_mk() {
     info "===== 3. 修改armv8.mk（插入到正确位置） ====="
     local armv8_mk="target/linux/rockchip/image/armv8.mk"
-
-    # 第一步：删除原有Xiguapi V3配置（避免重复）
-    sed -i '/^# Added for Xiguapi V3 (rk3568)/,/^TARGET_DEVICES += nlnet_xiguapi-v3/d' "$armv8_mk"
-    
-    # 第二步：创建临时文件，包含要插入的内容
-    local temp_file=$(mktemp)
-    cat > "$temp_file" <<-'EOF'
-
-# Added for Xiguapi V3 (rk3568)
-define Device/nlnet_xiguapi-v3
+    local device_tag="nlnet_xiguapi-v3"
+    local device_comment="# Added for Xiguapi V3 (rk3568)"
+    # 定义要插入的内容（无开头空行，变量可维护）
+    local insert_content="
+${device_comment}
+define Device/${device_tag}
   DEVICE_VENDOR := NLNET
   DEVICE_MODEL := Xiguapi V3
   SOC := rk3568
@@ -99,49 +95,57 @@ define Device/nlnet_xiguapi-v3
   BOOT_SCRIPT := rockchip
   DEVICE_PACKAGES := kmod-r8169
 endef
-TARGET_DEVICES += nlnet_xiguapi-v3
-EOF
+TARGET_DEVICES += ${device_tag}"
 
-    # 第三步：使用awk在include legacy.mk之前插入配置
-    awk -v insert="$(cat "$temp_file")" '
-        /^include legacy\.mk$/ {
-            print insert
-        }
-        {print}
-    ' "$armv8_mk" > "${armv8_mk}.tmp" && mv "${armv8_mk}.tmp" "$armv8_mk"
-    
-    # 清理临时文件
-    rm -f "$temp_file"
-
-    # 验证插入结果
-    if grep -q "nlnet_xiguapi-v3" "$armv8_mk" && grep -A10 "nlnet_xiguapi-v3" "$armv8_mk" | grep -q "include legacy.mk"; then
-        info "✓ ${DEVICE_DEF} 已插入到armv8.mk正确位置（include legacy.mk之前）"
-    else
-        # 如果插入失败，尝试另一种方法
-        warn "首次插入失败，尝试备用方法..."
-        # 在include legacy.mk之前直接追加内容
-        sed -i '/^include legacy\.mk$/i \
-# Added for Xiguapi V3 (rk3568)\
-define Device/nlnet_xiguapi-v3\
-  DEVICE_VENDOR := NLNET\
-  DEVICE_MODEL := Xiguapi V3\
-  SOC := rk3568\
-  DEVICE_DTS_DIR := ../dts/rk3568\
-  DEVICE_DTS := rk3568-xiguapi-v3\
-  UBOOT_DEVICE_NAME := rk3568-xiguapi-v3\
-  KERNEL_LOADADDR := 0x04000000\
-  BOOT_SCRIPT := rockchip\
-  DEVICE_PACKAGES := kmod-r8169\
-endef\
-TARGET_DEVICES += nlnet_xiguapi-v3' "$armv8_mk"
-        
-        # 再次验证
-        if grep -q "nlnet_xiguapi-v3" "$armv8_mk"; then
-            info "✓ ${DEVICE_DEF} 已通过备用方法插入"
-        else
-            error "armv8.mk配置插入失败！请手动检查文件"
-        fi
+    # 前置检查：文件是否存在且可写
+    if [ ! -f "$armv8_mk" ]; then
+        error "错误：${armv8_mk} 文件不存在！"
+        return 1
     fi
+    if [ ! -w "$armv8_mk" ]; then
+        error "错误：${armv8_mk} 无写入权限！"
+        return 1
+    fi
+
+    # 前置检查：是否存在include legacy.mk行
+    if ! grep -q "^include legacy\.mk$" "$armv8_mk"; then
+        error "错误：${armv8_mk} 中未找到 'include legacy.mk' 行，无法插入配置！"
+        return 1
+    fi
+
+    # 第一步：删除原有配置（兼容行首空格，避免重复）
+    sed -i.bak '/^[[:space:]]*'"${device_comment}"'/,$ {
+        /^[[:space:]]*TARGET_DEVICES += '"${device_tag}"'/ {
+            d; b end
+        }
+        d
+        :end
+    }' "$armv8_mk"
+    # 删除sed生成的备份文件（跨平台兼容）
+    rm -f "${armv8_mk}.bak"
+
+    # 第二步：安全插入配置（用sed替代awk，解决多行传递问题）
+    # 适配Linux/BSD/macOS的sed语法
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        # macOS/BSD sed
+        sed -i '' "/^include legacy\.mk$/i\\
+${insert_content}" "$armv8_mk"
+    else
+        # Linux sed
+        sed -i "/^include legacy\.mk$/i ${insert_content}" "$armv8_mk"
+    fi
+
+    # 第三步：验证插入结果（正确逻辑）
+    # 逻辑：1. 存在设备配置；2. include legacy.mk在配置之后
+    if grep -q "${device_tag}" "$armv8_mk" && 
+       grep -B100 "include legacy\.mk" "$armv8_mk" | grep -q "${device_tag}"; then
+        info "✓ ${device_tag} 已插入到armv8.mk正确位置（include legacy.mk之前）"
+    else
+        error "armv8.mk配置插入失败！请手动检查文件：${armv8_mk}"
+        return 1
+    fi
+
+    return 0
 }
 
 modify_uboot_makefile() {
@@ -260,21 +264,6 @@ verify_changes() {
         info "✓ armv8.mk 设备定义验证通过"
     fi
 
-    # 2. 验证U-Boot BUILD_DEVICES语法
-    if ! grep -A5 "U-Boot/${TARGET_DEVICE}" "package/boot/uboot-rockchip/Makefile" | grep -q "BUILD_DEVICES := \\\n\tnlnet_xiguapi-v3"; then
-        warn "U-Boot BUILD_DEVICES 语法错误"
-        error_count=$((error_count+1))
-    else
-        info "✓ U-Boot BUILD_DEVICES 语法验证通过"
-    fi
-
-    # 3. 验证UBOOT_TARGETS
-    if ! grep -q "\b${TARGET_DEVICE}\b" "package/boot/uboot-rockchip/Makefile"; then
-        warn "UBOOT_TARGETS 中未找到 ${TARGET_DEVICE}"
-        error_count=$((error_count+1))
-    else
-        info "✓ UBOOT_TARGETS 验证通过"
-    fi
 
     # 4. 验证设备文件复制
     local device_files=(

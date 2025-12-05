@@ -42,11 +42,9 @@
 **请务必遵守以下规则，否则自定义配置可能丢失：**
 
 - **标准流程（推荐）**：将插件配置项添加到仓库的 **`configfiles/config_data.txt`** 文件中。
-    > **原因**：每日定时执行的 “Sync Files” 工作流会自动将 `.config` 文件更新为 iStoreOS 官方最新版本，直接修改 `.config` 文件会导致添加的配置被覆盖。
+    > **原因**：“Sync Files” 工作流会自动获取官方t68m的config，然后把`configfiles/config_data.txt`和`config`相结合在armv8/路径生成.config。所以新增什么配置，修改config_data.txt就好。
 
 - **高级定制**：如果**禁用了** “Sync Files” 工作流，则需直接将插件配置项添加到 **`rk35xx/.config`** 文件中。
-- **说明**：“Sync Files” 工作流会自动获取官方t68m的config，然后把`configfiles/config_data.txt`和`config`相结合在armv8/路径生成.config。
-
 ---
 
 

@@ -51,7 +51,8 @@ ensure_dir() {
     fi
 }
 
-copy_file_with_backup() {
+# 简化：移除备份逻辑，仅保留文件复制
+copy_file() {
     local src="$1"
     local dest="$2"
     ensure_dir "$(dirname "$dest")"
@@ -60,12 +61,7 @@ copy_file_with_backup() {
         error "源文件不存在: $src"
     fi
     
-    # 仅在第一次复制时备份目标文件
-    if [ -f "$dest" ] && [ ! -f "${dest}.bak.xiguapi" ]; then
-        cp -f "$dest" "${dest}.bak.xiguapi" || error "备份文件失败: $dest"
-        info "备份原文件: ${dest}.bak.xiguapi"
-    fi
-    
+    # 直接覆盖（新环境无需备份）
     cp -f "$src" "$dest" || error "复制文件失败: $src -> $dest"
     info "复制文件: $src -> $dest"
 }
@@ -89,11 +85,18 @@ init_check() {
     done
     info "所有必需设备文件验证通过"
 
+    # 新增：检查U-Boot核心依赖（rk3568 Default定义是否存在）
+    local uboot_default_def="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"
+    if ! grep -q "define U-Boot/rk3568/Default" "$uboot_default_def"; then
+        error "U-Boot核心依赖缺失：未找到 U-Boot/rk3568/Default 定义，请检查uboot-rockchip包是否完整"
+    fi
+    info "U-Boot rk3568 Default 依赖验证通过"
+
     # 切换工作目录到源码根目录
     cd "${SOURCE_ROOT_DIR}" || error "无法进入源码根目录: ${SOURCE_ROOT_DIR}"
     info "当前工作目录: $(pwd)"
 
-    # 脚本执行权限检查（新增健壮性修复）
+    # 脚本执行权限检查
     if [ ! -x "${BASH_SOURCE[0]}" ]; then
         warn "脚本无执行权限，自动添加..."
         chmod +x "${BASH_SOURCE[0]}" || error "添加执行权限失败"
@@ -105,17 +108,29 @@ copy_device_files() {
     
     # 补全所有目标路径为绝对路径
     local dts_dest="${SOURCE_ROOT_DIR}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
-    copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "$dts_dest"
+    copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "$dts_dest"
 
     local defconfig_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/configs/${UBOOT_CONFIG}_defconfig"
-    copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3_defconfig" "$defconfig_dest"
+    copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3_defconfig" "$defconfig_dest"
 
     local dtsi_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
-    copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3-u-boot.dtsi" "$dtsi_dest"
+    copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3-u-boot.dtsi" "$dtsi_dest"
 
-    # 注释冗余的upstream_dts复制（避免不存在路径报错，非核心修改）
-    # local upstream_dts_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/dts/upstream/src/arm64/rockchip/rk3568-xiguapi-v3.dts"
-    # copy_file_with_backup "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "$upstream_dts_dest"
+    # 验证U-Boot文件复制完整性
+    info "===== 验证U-Boot文件复制结果 ====="
+    local uboot_copy_files=(
+        "$defconfig_dest"
+        "$dtsi_dest"
+    )
+    for file in "${uboot_copy_files[@]}"; do
+        if [ ! -f "$file" ]; then
+            error "U-Boot文件复制失败：$file 不存在"
+        elif [ ! -s "$file" ]; then
+            error "U-Boot文件复制异常：$file 为空文件"
+        else
+            info "✓ U-Boot文件验证通过: $file"
+        fi
+    done
 }
 
 modify_armv8_mk() {
@@ -132,7 +147,7 @@ modify_armv8_mk() {
         return
     fi
 
-    # 添加设备定义（DEVICE_DTS_DIR按你的要求保留原路径，未修改）
+    # 添加设备定义
     cat >> "$armv8_mk" << EOF
 
 # Added for Xiguapi V3 (rk3568)
@@ -155,16 +170,10 @@ EOF
 modify_uboot_makefile() {
     info "===== 4. 修改uboot-rockchip Makefile ====="
     local uboot_makefile="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"
-    
-    # 备份原文件
-    if [ ! -f "${uboot_makefile}.bak.xiguapi" ]; then
-        cp -f "$uboot_makefile" "${uboot_makefile}.bak.xiguapi" || error "备份uboot Makefile失败"
-        info "备份uboot Makefile: ${uboot_makefile}.bak.xiguapi"
-    fi
 
-    # 添加U-Boot定义 - 核心修复：
-    # 1. 移除冗余的UBOOT_CONFIG字段（官方RK3568设备不指定）
-    # 2. BUILD_DEVICES对齐官方格式（换行+缩进+反斜杠）
+    # 移除备份逻辑（新环境无需备份）
+
+    # 添加U-Boot定义
     local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"  # 官方格式：设备名-soc
     if ! grep -q "$uboot_def" "$uboot_makefile"; then
         cat >> "$uboot_makefile" << EOF
@@ -182,10 +191,9 @@ EOF
         warn "${uboot_def} 已存在，跳过"
     fi
 
-    # 添加到UBOOT_TARGETS - 修复：优化sed逻辑，避免多余反斜杠
+    # 添加到UBOOT_TARGETS
     if ! grep -q "${DEVICE_NAME}-${SOC}" "$uboot_makefile"; then
         # 步骤1：找到UBOOT_TARGETS行，在末尾添加自定义设备（官方格式）
-        # 先检查行尾是否有反斜杠，无则添加
         sed -i "/^UBOOT_TARGETS :=/ s/\$/ \\/" "$uboot_makefile"
         # 步骤2：在UBOOT_TARGETS行下插入自定义设备（缩进+反斜杠）
         sed -i "/^UBOOT_TARGETS :=/a\  ${DEVICE_NAME}-${SOC} \\" "$uboot_makefile"
@@ -201,20 +209,19 @@ EOF
 modify_device_configs() {
     info "===== 5. 修改设备配置文件 ====="
     
-    # 修复01_leds配置：sed插入语法兼容GNU/BSD sed
+    # 修复01_leds配置
     local leds_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
     ensure_dir "$(dirname "$leds_file")"
     [ ! -f "$leds_file" ] && touch "$leds_file" && info "创建空文件: $leds_file"
-    [ ! -f "${leds_file}.bak.xiguapi" ] && cp -f "$leds_file" "${leds_file}.bak.xiguapi" && info "备份01_leds: ${leds_file}.bak.xiguapi"
 
     if ! grep -q "${BOARD_FULL_NAME}" "$leds_file"; then
-        # 修复：用printf构造换行内容，兼容所有sed版本
+        # 用printf构造换行内容，兼容所有sed版本
         local leds_config=$(printf '%s\n' "${BOARD_FULL_NAME})" \
             "\tucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"" \
             "\tucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"" \
             "\tucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"" \
             "\t;;")
-        # 插入到esac上方（适配原有case缩进）
+        # 插入到esac上方
         sed -i -e "/^[[:space:]]*esac/i\\
 ${leds_config}
 " "$leds_file" || error "修改LED配置失败"
@@ -226,14 +233,13 @@ ${leds_config}
         warn "${DEVICE_NAME} LED配置已存在，跳过"
     fi
 
-    # 修改02_network配置（保留原有逻辑，仅修复sed插入兼容）
+    # 修改02_network配置
     local network_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
     ensure_dir "$(dirname "$network_file")"
     [ ! -f "$network_file" ] && touch "$network_file" && info "创建空文件: $network_file"
-    [ ! -f "${network_file}.bak.xiguapi" ] && cp -f "$network_file" "${network_file}.bak.xiguapi"
 
     if ! grep -q "${BOARD_FULL_NAME}" "$network_file"; then
-        # 接口配置 - 修复sed插入兼容
+        # 接口配置
         local network_iface_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
             "\t\tucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"" \
             "\t\t;;")
@@ -241,7 +247,7 @@ ${leds_config}
 ${network_iface_config}
         }" "$network_file" || error "修改网络接口配置失败"
         
-        # MAC地址配置 - 修复sed插入兼容
+        # MAC地址配置
         local network_mac_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
             "\t\twan_mac=\$(generate_mac_from_boot_mmc)" \
             "\t\tlan_mac=\$(macaddr_add \"\$wan_mac\" 1)" \
@@ -254,14 +260,13 @@ ${network_mac_config}
         warn "${DEVICE_NAME} 网络配置已存在，跳过"
     fi
 
-    # 修改init.sh配置（保留原有逻辑，仅修复sed插入兼容）
+    # 修改init.sh配置
     local init_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
     ensure_dir "$(dirname "$init_file")"
     [ ! -f "$init_file" ] && touch "$init_file" && info "创建空文件: $init_file"
-    [ ! -f "${init_file}.bak.xiguapi" ] && cp -f "$init_file" "${init_file}.bak.xiguapi"
 
     if ! grep -q "${BOARD_FULL_NAME}" "$init_file"; then
-        # 接口修复 - 修复sed插入兼容
+        # 接口修复
         local init_iface_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
             "\t\t# No interface renaming needed" \
             "\t\t;;")
@@ -269,7 +274,7 @@ ${network_mac_config}
 ${init_iface_config}
         }" "$init_file" || error "修改接口修复配置失败"
         
-        # SMP亲和性 - 修复sed插入兼容
+        # SMP亲和性
         local init_smp_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
             "\t\tset_iface_cpumask 2 eth0" \
             "\t\tset_iface_cpumask 4 eth1" \
@@ -287,8 +292,9 @@ verify_changes() {
     info "===== 6. 验证修改结果 ====="
     local error_count=0
     local dts_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/dts/rk3568/${UBOOT_CONFIG}.dts"
+    local uboot_makefile="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"
+    local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"
 
-    # 修复：error改为warn，累加错误数（不再直接退出）
     # 验证设备定义
     if ! grep -q "define Device/${DEVICE_DEF}" "${SOURCE_ROOT_DIR}/target/linux/rockchip/image/armv8.mk"; then
         warn "armv8.mk 中未找到 ${DEVICE_DEF} 设备定义"
@@ -297,20 +303,66 @@ verify_changes() {
         info "✓ armv8.mk 设备定义验证通过"
     fi
 
-    # 验证UBOOT定义
-    if ! grep -q "U-Boot/${DEVICE_NAME}-${SOC}" "${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"; then
-        warn "uboot Makefile 中未找到 ${DEVICE_NAME}-${SOC} 定义"
+    # U-Boot 深度编译验证
+    info "===== 验证U-Boot编译配置 ====="
+    # 1. 验证U-Boot定义是否存在且语法正确
+    if ! grep -q "$uboot_def" "$uboot_makefile"; then
+        warn "uboot Makefile 中未找到 ${uboot_def} 定义"
         error_count=$((error_count+1))
     else
+        # 验证继承关系
+        if ! grep -A3 "$uboot_def" "$uboot_makefile" | grep -q "\$(U-Boot/rk3568/Default)"; then
+            warn "U-Boot定义错误：${uboot_def} 未继承 U-Boot/rk3568/Default"
+            error_count=$((error_count+1))
+        else
+            info "✓ U-Boot 继承关系验证通过"
+        fi
+
+        # 验证BUILD_DEVICES语法
+        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES:= \\\s*${DEVICE_DEF}"; then
+            warn "U-Boot BUILD_DEVICES 语法错误：需包含反斜杠+缩进，且指向 ${DEVICE_DEF}"
+            error_count=$((error_count+1))
+        else
+            info "✓ U-Boot BUILD_DEVICES 语法验证通过"
+        fi
         info "✓ uboot Makefile 定义验证通过"
     fi
 
-    # 验证UBOOT_TARGETS添加
-    if ! grep -q "${DEVICE_NAME}-${SOC}" "${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile" | grep -q "UBOOT_TARGETS"; then
+    # 2. 验证UBOOT_TARGETS添加
+    if ! grep -q "${DEVICE_NAME}-${SOC}" "$uboot_makefile" | grep -q "UBOOT_TARGETS"; then
         warn "UBOOT_TARGETS 中未找到 ${DEVICE_NAME}-${SOC}"
         error_count=$((error_count+1))
     else
+        # 验证UBOOT_TARGETS语法
+        local uboot_targets_last_line=$(grep -A 20 "UBOOT_TARGETS :=" "$uboot_makefile" | grep -v "^$" | tail -1)
+        if echo "$uboot_targets_last_line" | grep -q "\\\\$" && [ -z "$(echo "$uboot_targets_last_line" | sed 's/\\$//' | sed 's/ //g')"; then
+            warn "UBOOT_TARGETS 最后一行存在多余反斜杠，会导致编译错误"
+            error_count=$((error_count+1))
+        else
+            info "✓ UBOOT_TARGETS 语法验证通过"
+        fi
         info "✓ UBOOT_TARGETS 设备添加验证通过"
+    fi
+
+    # 3. 验证U-Boot编译文件完整性
+    local defconfig_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/configs/${UBOOT_CONFIG}_defconfig"
+    local dtsi_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
+    if [ ! -f "$defconfig_dest" ] || [ ! -s "$defconfig_dest" ]; then
+        warn "U-Boot defconfig 文件缺失/为空: $defconfig_dest"
+        error_count=$((error_count+1))
+    else
+        info "✓ U-Boot defconfig 文件验证通过"
+    fi
+    if [ ! -f "$dtsi_dest" ] || [ ! -s "$dtsi_dest" ]; then
+        warn "U-Boot dtsi 文件缺失/为空: $dtsi_dest"
+        error_count=$((error_count+1))
+    else
+        info "✓ U-Boot dtsi 文件验证通过"
+    fi
+
+    # 4. 验证U-Boot与设备树关联
+    if ! grep -q "uboot" "$dts_file" && [ -f "$dts_file" ]; then
+        warn "设备树文件未关联U-Boot：$dts_file 中未找到 uboot 关键字（可能影响引导）"
     fi
 
     # 验证DTS文件
@@ -326,7 +378,7 @@ verify_changes() {
         fi
     fi
 
-    # 验证LED/网络/init配置（使用统一的BOARD_FULL_NAME）
+    # 验证LED/网络/init配置
     local check_files=(
         "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
         "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
@@ -344,11 +396,18 @@ verify_changes() {
         fi
     done
 
+    # 检查U-Boot编译依赖工具
+    if ! command -v mkimage &>/dev/null; then
+        warn "U-Boot编译依赖缺失：mkimage 未安装（编译时可能失败）"
+    else
+        info "✓ U-Boot 编译工具 mkimage 已安装"
+    fi
+
     # 最后统一判断是否退出
     if [ $error_count -gt 0 ]; then
         error "共发现 ${error_count} 个验证错误，适配失败"
     else
-        info "✓ 所有修改验证通过！"
+        info "✓ 所有修改验证通过！U-Boot编译配置无异常"
     fi
 }
 

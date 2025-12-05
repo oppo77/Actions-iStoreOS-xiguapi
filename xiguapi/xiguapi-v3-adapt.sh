@@ -81,9 +81,8 @@ modify_armv8_mk() {
     local armv8_mk="target/linux/rockchip/image/armv8.mk"
     local device_tag="nlnet_xiguapi-v3"
     local device_comment="# Added for Xiguapi V3 (rk3568)"
-    # 定义要插入的内容（无开头空行，变量可维护）
-    local insert_content="
-${device_comment}
+    # 定义要插入的内容（移除开头空行，避免多余换行）
+    local insert_content="${device_comment}
 define Device/${device_tag}
   DEVICE_VENDOR := NLNET
   DEVICE_MODEL := Xiguapi V3
@@ -113,30 +112,28 @@ TARGET_DEVICES += ${device_tag}"
         return 1
     fi
 
-    # 第一步：删除原有配置（兼容行首空格，避免重复）
-    sed -i.bak '/^[[:space:]]*'"${device_comment}"'/,$ {
-        /^[[:space:]]*TARGET_DEVICES += '"${device_tag}"'/ {
-            d; b end
-        }
+    # 修复点1：简化删除原有配置的sed逻辑（避免复杂标签）
+    sed -i.bak -E '/^[[:space:]]*'"${device_comment}"'/ {
+        :loop
+        N
+        /TARGET_DEVICES \+\+ '"${device_tag}"'/!b loop
         d
-        :end
     }' "$armv8_mk"
-    # 删除sed生成的备份文件（跨平台兼容）
+    # 删除sed生成的备份文件
     rm -f "${armv8_mk}.bak"
 
-    # 第二步：安全插入配置（用sed替代awk，解决多行传递问题）
-    # 适配Linux/BSD/macOS的sed语法
+    # 修复点2：正确处理多行插入（转义换行符，适配GNU sed）
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        # macOS/BSD sed
-        sed -i '' "/^include legacy\.mk$/i\\
-${insert_content}" "$armv8_mk"
+        # macOS/BSD sed 多行插入（逐行转义）
+        printf "%s" "${insert_content}" | sed -e 's/\\/\\\\/g' -e 's/$/\\/' | \
+            sed -i '' -e "/^include legacy\.mk$/e cat /dev/stdin" "$armv8_mk"
     else
-        # Linux sed
-        sed -i "/^include legacy\.mk$/i ${insert_content}" "$armv8_mk"
+        # Linux GNU sed 多行插入（转义换行符）
+        escaped_insert=$(printf '%s' "${insert_content}" | sed -e 's/[\/&]/\\&/g' -e 's/\n/\\n/g')
+        sed -i -r "/^include legacy\.mk$/i ${escaped_insert}" "$armv8_mk"
     fi
 
-    # 第三步：验证插入结果（正确逻辑）
-    # 逻辑：1. 存在设备配置；2. include legacy.mk在配置之后
+    # 验证插入结果
     if grep -q "${device_tag}" "$armv8_mk" && 
        grep -B100 "include legacy\.mk" "$armv8_mk" | grep -q "${device_tag}"; then
         info "✓ ${device_tag} 已插入到armv8.mk正确位置（include legacy.mk之前）"
@@ -198,15 +195,9 @@ modify_device_configs() {
     local leds_file="target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
     # 删除旧配置
     sed -i "/${escaped_board})/,/^[[:space:]]*;;/d" "$leds_file"
-    # 插入新配置
-    sed -i '/^case \$board in/,/^esac/ {
-        /^esac/i\
-${escaped_board})\
-\tucidef_set_led_default "power" "POWER" "blue:power" "1"\
-\tucidef_set_led_netdev "status" "STATUS" "blue:status" "eth0"\
-\tucidef_set_led_netdev "network" "NETWORK" "blue:network" "eth1"\
-\t;;
-    }' "$leds_file"
+    # 插入新配置（修复sed插入语法）
+    sed -i '/^case \$board in/a \
+'"${escaped_board})\\\n\tucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"\\\n\tucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"\\\n\tucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"\\\n\t;;" "$leds_file"
     info "✓ LED配置已添加到 01_leds"
 
     # 5.2 修改02_network（网络+MAC配置）
@@ -214,20 +205,11 @@ ${escaped_board})\
     # 删除旧配置
     sed -i "/${escaped_board})/,/^[[:space:]]*;;/d" "$network_file"
     # 插入网络接口配置
-    sed -i '/rockchip_setup_interfaces()/,/^}/ {
-        /^\s*\*)/i\
-\tnlnet,xiguapi-v3)\
-\t\tucidef_set_interfaces_lan_wan "eth0" "eth1"\
-\t\t;;
-    }' "$network_file"
+    sed -i '/rockchip_setup_interfaces() {/a \
+\tnlnet,xiguapi-v3)\\\n\t\tucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"\\\n\t\t;;' "$network_file"
     # 插入MAC地址配置
-    sed -i '/rockchip_setup_macs()/,/^}/ {
-        /^\s*\*)/i\
-\tnlnet,xiguapi-v3)\
-\t\twan_mac=\$(generate_mac_from_boot_mmc)\
-\t\tlan_mac=\$(macaddr_add "\$wan_mac" 1)\
-\t\t;;
-    }' "$network_file"
+    sed -i '/rockchip_setup_macs() {/a \
+\tnlnet,xiguapi-v3)\\\n\t\twan_mac=\$(generate_mac_from_boot_mmc)\\\n\t\tlan_mac=\$(macaddr_add \"\$wan_mac\" 1)\\\n\t\t;;' "$network_file"
     info "✓ 网络+MAC配置已添加到 02_network"
 
     # 5.3 修改init.sh（接口修复+SMP亲和性）
@@ -235,20 +217,11 @@ ${escaped_board})\
     # 删除旧配置
     sed -i "/${escaped_board})/,/^[[:space:]]*;;/d" "$init_file"
     # 插入接口名称修复
-    sed -i '/board_fixup_iface_name()/,/^}/ {
-        /^\s*\*)/i\
-\tnlnet,xiguapi-v3)\
-\t\t# No interface renaming needed\
-\t\t;;
-    }' "$init_file"
+    sed -i '/board_fixup_iface_name() {/a \
+\tnlnet,xiguapi-v3)\\\n\t\t# No interface renaming needed\\\n\t\t;;' "$init_file"
     # 插入SMP亲和性配置
-    sed -i '/board_set_iface_smp_affinity()/,/^}/ {
-        /^\s*\*)/i\
-\tnlnet,xiguapi-v3)\
-\t\tset_iface_cpumask 2 eth0\
-\t\tset_iface_cpumask 4 eth1\
-\t\t;;
-    }' "$init_file"
+    sed -i '/board_set_iface_smp_affinity() {/a \
+\tnlnet,xiguapi-v3)\\\n\t\tset_iface_cpumask 2 eth0\\\n\t\tset_iface_cpumask 4 eth1\\\n\t\t;;' "$init_file"
     info "✓ 初始化配置已添加到 init.sh"
 }
 
@@ -264,8 +237,7 @@ verify_changes() {
         info "✓ armv8.mk 设备定义验证通过"
     fi
 
-
-    # 4. 验证设备文件复制
+    # 2. 验证设备文件复制
     local device_files=(
         "target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
         "package/boot/uboot-rockchip/src/configs/rk3568-xiguapi-v3_defconfig"
@@ -279,7 +251,7 @@ verify_changes() {
     done
     [ $error_count -eq 0 ] && info "✓ 所有设备文件复制验证通过"
 
-    # 5. 验证DTS设备标识
+    # 3. 验证DTS设备标识
     if grep -q "xiguapi-v3" "target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"; then
         info "✓ DTS文件包含设备标识"
     else
@@ -287,7 +259,7 @@ verify_changes() {
         error_count=$((error_count+1))
     fi
 
-    # 6. 验证配置文件（LED/网络/初始化）
+    # 4. 验证配置文件（LED/网络/初始化）
     local config_checks=(
         "01_leds:${BOARD_FULL_NAME}"
         "02_network:${BOARD_FULL_NAME}"
@@ -305,7 +277,7 @@ verify_changes() {
         fi
     done
 
-    # 7. 验证mkimage工具（仅警告）
+    # 5. 验证mkimage工具（仅警告）
     command -v mkimage &>/dev/null || warn "mkimage 未安装（可能影响U-Boot编译）"
 
     # 最终结果判断

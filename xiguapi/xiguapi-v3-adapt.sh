@@ -83,8 +83,9 @@ modify_armv8_mk() {
     # 第一步：删除原有Xiguapi V3配置（避免重复）
     sed -i '/^# Added for Xiguapi V3 (rk3568)/,/^TARGET_DEVICES += nlnet_xiguapi-v3/d' "$armv8_mk"
     
-    # 第二步：定义要插入的设备配置（保持格式一致）
-    local xiguapi_config=$(cat <<-'EOF'
+    # 第二步：创建临时文件，包含要插入的内容
+    local temp_file=$(mktemp)
+    cat > "$temp_file" <<-'EOF'
 
 # Added for Xiguapi V3 (rk3568)
 define Device/nlnet_xiguapi-v3
@@ -100,16 +101,46 @@ define Device/nlnet_xiguapi-v3
 endef
 TARGET_DEVICES += nlnet_xiguapi-v3
 EOF
-    )
 
-    # 第三步：插入到include legacy.mk之前（核心：确保配置被解析）
-    sed -i "/^include legacy.mk/i\\${xiguapi_config}" "$armv8_mk"
+    # 第三步：使用awk在include legacy.mk之前插入配置
+    awk -v insert="$(cat "$temp_file")" '
+        /^include legacy\.mk$/ {
+            print insert
+        }
+        {print}
+    ' "$armv8_mk" > "${armv8_mk}.tmp" && mv "${armv8_mk}.tmp" "$armv8_mk"
+    
+    # 清理临时文件
+    rm -f "$temp_file"
 
     # 验证插入结果
     if grep -q "nlnet_xiguapi-v3" "$armv8_mk" && grep -A10 "nlnet_xiguapi-v3" "$armv8_mk" | grep -q "include legacy.mk"; then
         info "✓ ${DEVICE_DEF} 已插入到armv8.mk正确位置（include legacy.mk之前）"
     else
-        error "armv8.mk配置插入失败！请手动检查文件"
+        # 如果插入失败，尝试另一种方法
+        warn "首次插入失败，尝试备用方法..."
+        # 在include legacy.mk之前直接追加内容
+        sed -i '/^include legacy\.mk$/i \
+# Added for Xiguapi V3 (rk3568)\
+define Device/nlnet_xiguapi-v3\
+  DEVICE_VENDOR := NLNET\
+  DEVICE_MODEL := Xiguapi V3\
+  SOC := rk3568\
+  DEVICE_DTS_DIR := ../dts/rk3568\
+  DEVICE_DTS := rk3568-xiguapi-v3\
+  UBOOT_DEVICE_NAME := rk3568-xiguapi-v3\
+  KERNEL_LOADADDR := 0x04000000\
+  BOOT_SCRIPT := rockchip\
+  DEVICE_PACKAGES := kmod-r8169\
+endef\
+TARGET_DEVICES += nlnet_xiguapi-v3' "$armv8_mk"
+        
+        # 再次验证
+        if grep -q "nlnet_xiguapi-v3" "$armv8_mk"; then
+            info "✓ ${DEVICE_DEF} 已通过备用方法插入"
+        else
+            error "armv8.mk配置插入失败！请手动检查文件"
+        fi
     fi
 }
 

@@ -18,7 +18,7 @@ SOURCE_ROOT_DIR=$(cd "${OPENWRT_ROOT}" && pwd) || {
 DEVICE_NAME="xiguapi-v3"
 SOC="rk3568"
 DEVICE_DEF="nlnet_xiguapi-v3"
-UBOOT_CONFIG="rk3568-xiguapi-v3"
+UBOOT_CONFIG="rk3568-xiguapi-v3"  # 仅用于DTS命名，U-Boot定义中不再使用
 # 统一board名称（匹配OpenWRT标准格式：厂商,设备名）
 BOARD_FULL_NAME="nlnet,${DEVICE_NAME}"
 # 网卡驱动可配置变量（按你的要求保留，未修改）
@@ -162,8 +162,10 @@ modify_uboot_makefile() {
         info "备份uboot Makefile: ${uboot_makefile}.bak.xiguapi"
     fi
 
-    # 添加U-Boot定义 - 核心修复：BUILD_DEVICES语法错误（移除多余反斜杠）
-    local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"
+    # 添加U-Boot定义 - 核心修复：
+    # 1. 移除冗余的UBOOT_CONFIG字段（官方RK3568设备不指定）
+    # 2. BUILD_DEVICES对齐官方格式（换行+缩进+反斜杠）
+    local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"  # 官方格式：设备名-soc
     if ! grep -q "$uboot_def" "$uboot_makefile"; then
         cat >> "$uboot_makefile" << EOF
 
@@ -171,8 +173,8 @@ modify_uboot_makefile() {
 define ${uboot_def}
   \$(U-Boot/rk3568/Default)  # 继承RK3568默认依赖/ATF/TPL配置
   NAME:=Xiguapi V3
-  UBOOT_CONFIG:=${UBOOT_CONFIG}
-  BUILD_DEVICES:= ${DEVICE_DEF}  # 修复：移除反斜杠，单行定义
+  BUILD_DEVICES:= \          # 对齐官方格式：单行也保留反斜杠
+    ${DEVICE_DEF}            # 对应armv8.mk中的DEVICE_DEF
 endef
 EOF
         info "已添加 ${uboot_def} 定义（继承RK3568默认配置）"
@@ -180,16 +182,15 @@ EOF
         warn "${uboot_def} 已存在，跳过"
     fi
 
-    # 添加到UBOOT_TARGETS - 修复：注释移到行外，避免截断sed命令
+    # 添加到UBOOT_TARGETS - 修复：优化sed逻辑，避免多余反斜杠
     if ! grep -q "${DEVICE_NAME}-${SOC}" "$uboot_makefile"; then
-        # 步骤1：给UBOOT_TARGETS行末尾加反斜杠（如果没有）
-        sed -i -e "/^UBOOT_TARGETS :=/ { /\\$/! s/\$/ \\/; }" \
-             # 步骤2：在UBOOT_TARGETS行下追加设备名
-             -e "/^UBOOT_TARGETS :=/ a\  ${DEVICE_NAME}-${SOC} \\" \
-             "$uboot_makefile"
-        
-        # 步骤3：清理多余反斜杠（避免语法错误）
-        sed -i -e '/^UBOOT_TARGETS :=/ { :loop; n; /^[^ \t]/! { s/\\$//; b loop; }; }' "$uboot_makefile"
+        # 步骤1：找到UBOOT_TARGETS行，在末尾添加自定义设备（官方格式）
+        # 先检查行尾是否有反斜杠，无则添加
+        sed -i "/^UBOOT_TARGETS :=/ s/\$/ \\/" "$uboot_makefile"
+        # 步骤2：在UBOOT_TARGETS行下插入自定义设备（缩进+反斜杠）
+        sed -i "/^UBOOT_TARGETS :=/a\  ${DEVICE_NAME}-${SOC} \\" "$uboot_makefile"
+        # 步骤3：清理最后一行的多余反斜杠（避免Makefile语法错误）
+        sed -i '/^UBOOT_TARGETS :/,/^$/ { /[^\\]$/! s/\\$// }' "$uboot_makefile"
         
         info "已添加 ${DEVICE_NAME}-${SOC} 到 UBOOT_TARGETS"
     else
@@ -302,6 +303,14 @@ verify_changes() {
         error_count=$((error_count+1))
     else
         info "✓ uboot Makefile 定义验证通过"
+    fi
+
+    # 验证UBOOT_TARGETS添加
+    if ! grep -q "${DEVICE_NAME}-${SOC}" "${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile" | grep -q "UBOOT_TARGETS"; then
+        warn "UBOOT_TARGETS 中未找到 ${DEVICE_NAME}-${SOC}"
+        error_count=$((error_count+1))
+    else
+        info "✓ UBOOT_TARGETS 设备添加验证通过"
     fi
 
     # 验证DTS文件

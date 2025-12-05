@@ -1,23 +1,351 @@
-- name: 执行xiguapi-v3设备适配脚本
-  run: |
-    echo "工作目录: ${{ env.WORKDIR }}"
-    SCRIPT_PATH="${GITHUB_WORKSPACE}/xiguapi/xiguapi-v3-adapt.sh"
-    if [ -f "$SCRIPT_PATH" ]; then
-      echo "找到适配脚本: $SCRIPT_PATH"
-      chmod +x $SCRIPT_PATH
-      # 显式指定 OPENWRT_ROOT 为源码目录（核心：告诉脚本源码在哪里）
-      export OPENWRT_ROOT="${{ env.WORKDIR }}/openwrt"
-      echo "OPENWRT_ROOT设置为: $OPENWRT_ROOT"
-      # 直接执行仓库中的脚本，无需复制
-      $SCRIPT_PATH
-      if [ $? -eq 0 ]; then
-        echo "✅ xiguapi-v3适配脚本执行成功"
-      else
-        echo "❌ xiguapi-v3适配脚本执行失败"
-        exit 1
-      fi
-    else
-      echo "❌ 适配脚本不存在: $SCRIPT_PATH"
-      find ${GITHUB_WORKSPACE} -name "*.sh" -type f | head -20
-      exit 1
-    fi
+name: Build iStore OS 6.x
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+  schedule:
+   - cron: 0 16 * * *
+
+env:
+  REPO_URL: https://github.com/istoreos/istoreos
+  REPO_BRANCH: istoreos-24.10.2
+  FEEDS_CONF: feeds.conf
+  CONFIG_FILE: .config
+  DIY_P1_SH: diy-part1-6.x.sh
+  DIY_P2_SH: diy-part2-6.x.sh
+  UPLOAD_BIN_DIR: true
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ARCHITECTURE: armv8
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: 最大化磁盘空间（核心优化）
+      uses: easimon/maximize-build-space@master
+      with:
+        swap-size-mb: 2048  # 增大交换分区
+        temp-reserve-mb: 50
+        root-reserve-mb: 2048
+        # 自动删除大体积默认目录
+        remove-dotnet: true
+        remove-android: true
+        remove-haskell: true
+        remove-codeql: true
+
+    - name: 准备完成
+      uses: actions/checkout@main
+
+    - name: 创建工作目录
+      run: |
+        mkdir -p ${GITHUB_WORKSPACE}/workdir
+        chmod 755 ${GITHUB_WORKSPACE}/workdir
+        echo "WORKDIR=${GITHUB_WORKSPACE}/workdir" >> $GITHUB_ENV
+        echo "当前工作目录: $(pwd)"
+
+    - name: 检查服务器配置
+      run: |
+        echo "若分配的服务器性能不足，务必及时取消，重新运行！"
+        echo -e "------------------------------- CPU信息 -------------------------------\n"
+        echo "CPU物理数量:$(cat /proc/cpuinfo| grep "physical id"| sort| uniq| wc -l)"
+        echo -e "CPU核心及版本信息: $(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
+        echo -e "------------------------------- 内存信息 -------------------------------\n"
+        echo "已安装内存详细信息: "
+        sudo lshw -short -C memory | grep GiB
+        echo -e "\n"
+        echo -e "------------------------------- 磁盘信息（清理前） -------------------------------\n"
+        df -Th
+
+    - name: 初始化编译环境（核心优化：先清理再装依赖）
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        echo "------------------------------- 仅更新源（跳过upgrade，避免占用空间） -------------------------------"
+        # 关键：跳过apt upgrade（编译iStoreOS无需系统升级，仅需安装依赖）
+        sudo apt update -y
+
+        echo "------------------------------- 安装编译核心依赖（最小化） -------------------------------"
+        # 仅保留编译必需依赖，删除所有非必要工具（如vim/mercurial/bzr等）
+        sudo apt install -y \
+          build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+          autoconf automake binutils libtool patch pkgconf quilt \
+          gettext libncursesw5-dev libncurses-dev libreadline-dev \
+          libssl-dev libelf-dev libglib2.0-dev device-tree-compiler \
+          liblzma-dev libc6-dev-i386 lib32gcc-s1 lib32stdc++6 zlib1g-dev \
+          python3 python3-pyelftools python3-setuptools python3-distutils \
+          python3-pip python3-yaml python3-dev libpython3-dev \
+          bzip2 ccache cpio curl rsync squashfs-tools unzip xxd bc haveged \
+          uuid-runtime dosfstools mtools parted u-boot-tools \
+          git xsltproc libxml-parser-perl ant wget cmake ninja-build patchelf swig \
+          openjdk-11-jre-headless
+        
+        echo "------------------------------- Python工具安装 -------------------------------"
+        sudo pip3 install pyelftools setuptools pyyaml --no-cache-dir  # 禁用缓存，节省空间
+        
+        echo "------------------------------- 最终磁盘检查 -------------------------------"
+        df -Th
+        
+        echo "------------------------------- 设置时区 -------------------------------"
+        sudo timedatectl set-timezone "$TZ"
+
+    - name: 克隆源码
+      working-directory: ${{ env.WORKDIR }}
+      run: |
+        echo "当前工作目录: $(pwd)"
+        df -hT $PWD
+        git clone ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} openwrt   # 浅克隆，减少源码体积
+        echo "源码克隆完成，当前目录内容:"
+        ls -la
+        ln -sf ${{ env.WORKDIR }}/openwrt $GITHUB_WORKSPACE/openwrt || true
+
+    - name: 执行xiguapi-v3设备适配脚本
+      run: |
+        echo "工作目录: ${{ env.WORKDIR }}"
+        SCRIPT_PATH="${GITHUB_WORKSPACE}/xiguapi/xiguapi-v3-adapt.sh"
+        if [ -f "$SCRIPT_PATH" ]; then
+          echo "找到适配脚本: $SCRIPT_PATH"
+          chmod +x $SCRIPT_PATH
+          # 设置OPENWRT_ROOT环境变量
+          export OPENWRT_ROOT="${{ env.WORKDIR }}/openwrt"
+          echo "OPENWRT_ROOT设置为: $OPENWRT_ROOT"
+          $SCRIPT_PATH
+          if [ $? -eq 0 ]; then
+            echo "✅ xiguapi-v3适配脚本执行成功"
+          else
+            echo "❌ xiguapi-v3适配脚本执行失败"
+            exit 1
+          fi
+        else
+          echo "❌ 适配脚本不存在: $SCRIPT_PATH"
+          echo "当前目录内容:"
+          find ${GITHUB_WORKSPACE} -name "*.sh" -type f | head -20
+          exit 1
+        fi
+
+    - name: 加载自定义 feeds
+      env:
+        FEEDS_CONF_PATH: ${{ env.ARCHITECTURE }}/${{ env.FEEDS_CONF }}
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: |
+        echo "当前工作目录: $(pwd)"
+        [ -e $FEEDS_CONF_PATH ] && mv $FEEDS_CONF_PATH ${{ env.FEEDS_CONF }}
+        chmod +x ${{ github.workspace }}/${{ env.DIY_P1_SH }}
+        ${{ github.workspace }}/${{ env.DIY_P1_SH }}
+
+    - name: 更新 feeds（第1遍）
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: ./scripts/feeds update -a
+
+    - name: 更新 feeds（第2遍）
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: ./scripts/feeds update -a
+
+    - name: 安装 feeds（第1遍）
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: ./scripts/feeds install -a
+
+    - name: 安装 feeds（第2遍）
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: ./scripts/feeds install -a
+      # 修复：删除游离的 sed 命令，移到「加载自定义配置」步骤
+
+    - name: 加载自定义配置
+      env:
+        # 核心修复：指向仓库根目录的 armv8/.config（绝对路径）
+        CONFIG_FILE_PATH: ${{ github.workspace }}/${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: |
+        echo "当前工作目录: $(pwd)"
+        # 修复1：备份 files 目录（如果存在）
+        [ -d "files" ] && mv files ${{ github.workspace }}/files && echo "✅ 备份 files 目录完成"
+        
+        # 修复2：验证配置文件是否存在（核心修复）
+        if [ -e "$CONFIG_FILE_PATH" ]; then
+          cp "$CONFIG_FILE_PATH" "${{ env.CONFIG_FILE }}"
+          echo "✅ 加载自定义配置文件: $CONFIG_FILE_PATH"
+        else
+          echo "❌ 自定义配置文件不存在: $CONFIG_FILE_PATH"
+          echo "当前仓库根目录下的 armv8 目录内容: $(ls -la ${{ github.workspace }}/${{ env.ARCHITECTURE }}/ 2>/dev/null || true)"
+          exit 1
+        fi
+        
+        # 执行 diy-part2.sh 脚本
+        chmod +x ${{ github.workspace }}/${{ env.DIY_P2_SH }}
+        ${{ github.workspace }}/${{ env.DIY_P2_SH }}
+        echo "✅ 执行 diy-part2.sh 完成"
+        
+        # 修复3：将游离的 sed 命令移到此处，删除 luci-app-baidupcs-web
+        sed -i '/luci-app-baidupcs-web/d' .config
+        echo "✅ 移除 luci-app-baidupcs-web 配置完成"
+        
+        # 修复4：验证编译目标配置（核心！确保选中 rockchip/armv8，而非 ath79）
+        echo "===== 验证编译目标配置 ====="
+        # 检查是否选中 rockchip/armv8
+        if ! grep -q "CONFIG_TARGET_rockchip_armv8=y" .config; then
+          echo "❌ 错误：.config 中未选中 rockchip/armv8 目标"
+          echo "当前 .config 中的目标配置:"
+          grep -E "CONFIG_TARGET_(rockchip|ath79|ramips)" .config || true
+          exit 1
+        fi
+        
+        # 检查是否选中 xiguapi-v3 设备
+        if ! grep -q "CONFIG_TARGET_rockchip_armv8_DEVICE_nlnet_xiguapi-v3=y" .config; then
+          echo "❌ 错误：.config 中未选中 nlnet_xiguapi-v3 设备"
+          echo "当前已选中的 rockchip 设备:"
+          grep -E "CONFIG_TARGET_rockchip_armv8_DEVICE_" .config || true
+          exit 1
+        fi
+        
+        # 检查是否未选中 ath79（避免编译默认 ath79 固件）
+        if grep -q "CONFIG_TARGET_ath79=y" .config; then
+          echo "❌ 错误：.config 中仍选中了 ath79 目标，需禁用"
+          sed -i '/CONFIG_TARGET_ath79=y/d' .config
+          sed -i 's/CONFIG_TARGET_ath79=.*/# CONFIG_TARGET_ath79 is not set/' .config
+          echo "✅ 已禁用 ath79 目标"
+        fi
+        
+        echo "===== 编译目标配置验证通过 ====="
+
+    - name: 下载软件包（第1遍）
+      id: package1
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: |
+        make defconfig
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: 下载软件包（第2遍）
+      id: package2
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: |
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: 编译固件
+      id: compile
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: |
+        echo "当前工作目录: $(pwd)"
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        
+        # 调试信息：检查固件目录结构
+        echo "编译完成，检查固件目录:"
+        find bin -type f -name "*.bin" -o -name "*.img" -o -name "*.gz" 2>/dev/null | head -20 || true
+        echo "bin目录结构:"
+        ls -la bin/ || true
+        if [ -d "bin/targets" ]; then
+          echo "targets目录结构:"
+          find bin/targets -type d 2>/dev/null | head -20 || true
+        fi
+        
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        echo "status=success" >> ${GITHUB_OUTPUT}
+
+    - name: 检查磁盘空间
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 上传 bin 文件夹
+      uses: actions/upload-artifact@main
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin${{ env.FILE_DATE }}
+        path: ${{ env.WORKDIR }}/openwrt/bin
+
+    - name: 整理固件文件
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      working-directory: ${{ env.WORKDIR }}/openwrt
+      run: |
+        echo "当前工作目录: $(pwd)"
+        
+        # 查找固件目录
+        if [ -d "bin/targets/rockchip/armv8" ]; then
+          echo "找到固定路径: bin/targets/rockchip/armv8"
+          FIRMWARE_DIR="bin/targets/rockchip/armv8"
+        else
+          # 使用通配符查找
+          TARGET_DIRS=($(find bin/targets -maxdepth 2 -mindepth 2 -type d ! -name "packages" 2>/dev/null))
+          if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
+            echo "找到通配符路径: ${TARGET_DIRS[0]}"
+            FIRMWARE_DIR="${TARGET_DIRS[0]}"
+          else
+            echo "错误：未找到固件输出目录"
+            echo "当前目录结构:"
+            ls -la
+            echo "bin目录结构:"
+            find bin -type d 2>/dev/null | head -20
+            exit 1
+          fi
+        fi
+        
+        cd "$FIRMWARE_DIR"
+        echo "已进入固件目录: $(pwd)"
+        echo "目录内容:"
+        ls -la || true
+        
+        # 删除packages目录
+        if [ -d "packages" ]; then
+          rm -rf packages
+          echo "已删除packages目录"
+        fi
+        
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "FIRMWARE_FILES=$(ls *.bin *.img *.gz 2>/dev/null | wc -l)" >> $GITHUB_ENV
+        echo "status=success" >> ${GITHUB_OUTPUT}
+
+    - name: 上传固件目录
+      uses: actions/upload-artifact@main
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: OpenWrt_firmware${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
+
+    - name: 生成发布标签
+      id: tag
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        echo "release_tag=$(date +"%Y.%m.%d-%H.%M")-${{ env.ARCHITECTURE }}-xiguapi-v3" >> ${GITHUB_OUTPUT}
+        touch release.txt
+        echo "
+        💻 架构: ${{ env.ARCHITECTURE }}
+        📇 设备: Xiguapi V3 (rk3568)
+        📂 源码: ${{ env.REPO_URL }}
+        🌳 分支: ${{ env.REPO_BRANCH }}
+        ⏱️ 编译时间: $(date +"%Y年%m月%d日%H时%M分")
+        🌐 管理地址: 192.168.100.1
+        👤 用户名: root
+        🔒 密码: password
+        📒 说明: Xiguapi V3 设备专属固件，默认网口 eth0=LAN, eth1=WAN，主路由模式。 " >> release.txt
+        echo "status=success" >> ${GITHUB_OUTPUT}
+
+    - name: 自动发布固件到 Releases
+      uses: softprops/action-gh-release@v2
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*
+
+    - name: 删除运行记录
+      uses: xiaomeng9597/delete-workflow-runs@main
+      with:
+        retain_days: 20
+        keep_minimum_runs: 15
+        token: ${{ env.GITHUB_TOKEN }}
+
+    - name: 删除自动发布的旧固件
+      uses: dev-drprasad/delete-older-releases@v0.3.3
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: 60
+        delete_tags: true
+
+解析一下完整的文件和文件夹操作

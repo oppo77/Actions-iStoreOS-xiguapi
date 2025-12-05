@@ -51,6 +51,37 @@ ensure_dir() {
     fi
 }
 
+# 验证OpenWRT原生文件存在且结构合法
+validate_original_file() {
+    local file="$1"
+    local file_desc="$2"
+    local required_patterns="${3:-}"
+
+    # 第一步：校验文件存在性
+    if [ ! -f "$file" ]; then
+        error "${file_desc}文件缺失：$file
+请检查OpenWRT源码完整性，该文件是rockchip/armv8平台原生文件，不可手动创建空文件！"
+    fi
+
+    # 第二步：校验文件基本结构（可选，传入required_patterns时生效）
+    if [ -n "$required_patterns" ]; then
+        local missing_patterns=()
+        IFS="|" read -ra patterns <<< "$required_patterns"
+        for pattern in "${patterns[@]}"; do
+            if ! grep -q "$pattern" "$file"; then
+                missing_patterns+=("$pattern")
+            fi
+        done
+        if [ ${#missing_patterns[@]} -gt 0 ]; then
+            error "${file_desc}文件结构异常：缺失关键内容 ${missing_patterns[*]}
+文件路径：$file
+请确认该文件是OpenWRT rockchip/armv8平台的原生文件！"
+        fi
+    fi
+
+    info "✓ ${file_desc}文件验证通过：$file"
+}
+
 # 简化：移除备份逻辑，仅保留文件复制
 copy_file() {
     local src="$1"
@@ -72,6 +103,11 @@ safe_sed_insert() {
     local match_pattern="$2"
     local insert_content="$3"
     
+    # 先校验匹配模式是否存在（避免插入到错误位置）
+    if ! grep -q "$match_pattern" "$file"; then
+        error "插入失败：文件 $file 中未找到匹配模式 '$match_pattern'，无法定位插入位置"
+    fi
+
     # 使用临时文件避免sed直接修改的语法问题
     local tmp_file=$(mktemp)
     # 转义插入内容中的特殊字符（括号、换行、逗号）
@@ -110,10 +146,13 @@ init_check() {
 
     \# 新增：检查U-Boot核心依赖（rk3568 Default定义是否存在）
     local uboot_default_def="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"
-    if ! grep -q "define U-Boot/rk3568/Default" "$uboot_default_def"; then
-        error "U-Boot核心依赖缺失：未找到 U-Boot/rk3568/Default 定义，请检查uboot-rockchip包是否完整"
-    fi
+    validate_original_file "$uboot_default_def" "U-Boot Makefile" "define U-Boot/rk3568/Default"
     info "U-Boot rk3568 Default 依赖验证通过"
+
+    \# 提前校验OpenWRT核心配置文件（避免后续操作失败）
+    validate_original_file "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds" "LED配置文件" "board_config_update|case \$board in|radxa,e54c))"
+    validate_original_file "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network" "网络配置文件" "rockchip_setup_interfaces|rockchip_setup_macs"
+    validate_original_file "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh" "初始化配置文件" "board_fixup_iface_name|board_set_iface_smp_affinity"
 
     \# 切换工作目录到源码根目录
     cd "${SOURCE_ROOT_DIR}" || error "无法进入源码根目录: ${SOURCE_ROOT_DIR}"
@@ -159,10 +198,7 @@ copy_device_files() {
 modify_armv8_mk() {
     info "===== 3. 修改armv8.mk ====="
     local armv8_mk="${SOURCE_ROOT_DIR}/target/linux/rockchip/image/armv8.mk"
-    local armv8_dir=$(dirname "$armv8_mk")
-
-    \# 确保目录存在
-    ensure_dir "$armv8_dir"
+    validate_original_file "$armv8_mk" "armv8.mk设备定义文件" "define Device/"
 
     \# 避免重复添加
     if grep -q "define Device/${DEVICE_DEF}" "$armv8_mk"; then
@@ -193,6 +229,7 @@ EOF
 modify_uboot_makefile() {
     info "===== 4. 修改uboot-rockchip Makefile ====="
     local uboot_makefile="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"
+    validate_original_file "$uboot_makefile" "uboot-rockchip Makefile" "UBOOT_TARGETS :="
 
     \# 添加U-Boot定义
     local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"  \# 官方格式：设备名-soc
@@ -232,9 +269,8 @@ modify_device_configs() {
     
     \# 修复01_leds配置（核心修复部分）
     local leds_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
-    ensure_dir "$(dirname "$leds_file")"
-    [ ! -f "$leds_file" ] && touch "$leds_file" && info "创建空文件: $leds_file"
-
+    \# 已在init_check中校验过文件存在性和结构，无需再touch
+    
     \# 转义BOARD_FULL_NAME中的逗号（避免sed匹配错误）
     local escaped_board_name="${BOARD_FULL_NAME//,/\\,}"
     
@@ -252,7 +288,7 @@ modify_device_configs() {
         
         # 使用安全插入函数，避免sed语法错误
         safe_sed_insert "${leds_file}" "${match_pattern}" "${leds_config}" || error "修改LED配置失败"
-        info "已添加 ${DEVICE_NAME} LED配置"
+        info "已添加 ${DEVICE_NAME} LED配置到原生01_leds文件"
         
         # 调试：输出插入结果
         info "DEBUG: 01_leds 插入后关键内容："
@@ -263,8 +299,7 @@ modify_device_configs() {
 
     # 修改02_network配置
     local network_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
-    ensure_dir "$(dirname "$network_file")"
-    [ ! -f "$network_file" ] && touch "$network_file" && info "创建空文件: $network_file"
+    # 已在init_check中校验过文件存在性和结构，无需再touch
 
     if ! grep -q "${escaped_board_name}" "$network_file"; then
         # 接口配置（使用安全插入函数）
@@ -272,8 +307,11 @@ modify_device_configs() {
 	ucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"
 	;;"
         
-        # 找到rockchip_setup_interfaces函数中的*)前插入
-        safe_sed_insert "${network_file}" "rockchip_setup_interfaces\(\).*\n.*case" "${network_iface_config}" || error "修改网络接口配置失败"
+        # 找到rockchip_setup_interfaces函数中的case行插入
+        local iface_match_pattern="rockchip_setup_interfaces\(\).*\n.*case"
+        # 转换为sed可匹配的单行模式（适配换行）
+        iface_match_pattern="rockchip_setup_interfaces.*;.*case"
+        safe_sed_insert "${network_file}" "${iface_match_pattern}" "${network_iface_config}" || error "修改网络接口配置失败"
         
         # MAC地址配置
         local network_mac_config="${BOARD_FULL_NAME})
@@ -281,17 +319,18 @@ modify_device_configs() {
 	lan_mac=\$(macaddr_add \"\$wan_mac\" 1)
 	;;"
         
-        # 找到rockchip_setup_macs函数中的*)前插入
-        safe_sed_insert "${network_file}" "rockchip_setup_macs\(\).*\n.*case" "${network_mac_config}" || error "修改MAC配置失败"
-        info "已添加 ${DEVICE_NAME} 网络配置"
+        # 找到rockchip_setup_macs函数中的case行插入
+        local mac_match_pattern="rockchip_setup_macs\(\).*\n.*case"
+        mac_match_pattern="rockchip_setup_macs.*;.*case"
+        safe_sed_insert "${network_file}" "${mac_match_pattern}" "${network_mac_config}" || error "修改MAC配置失败"
+        info "已添加 ${DEVICE_NAME} 网络配置到原生02_network文件"
     else
         warn "${DEVICE_NAME} 网络配置已存在，跳过"
     fi
 
     # 修改init.sh配置
     local init_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
-    ensure_dir "$(dirname "$init_file")"
-    [ ! -f "$init_file" ] && touch "$init_file" && info "创建空文件: $init_file"
+    # 已在init_check中校验过文件存在性和结构，无需再touch
 
     if ! grep -q "${escaped_board_name}" "$init_file"; then
         # 接口修复
@@ -299,7 +338,8 @@ modify_device_configs() {
 	# No interface renaming needed
 	;;"
         
-        safe_sed_insert "${init_file}" "board_fixup_iface_name\(\).*\n.*case" "${init_iface_config}" || error "修改接口修复配置失败"
+        local init_iface_match="board_fixup_iface_name.*;.*case"
+        safe_sed_insert "${init_file}" "${init_iface_match}" "${init_iface_config}" || error "修改接口修复配置失败"
         
         # SMP亲和性
         local init_smp_config="${BOARD_FULL_NAME})
@@ -307,8 +347,9 @@ modify_device_configs() {
 	set_iface_cpumask 4 eth1
 	;;"
         
-        safe_sed_insert "${init_file}" "board_set_iface_smp_affinity\(\).*\n.*case" "${init_smp_config}" || error "修改SMP亲和性配置失败"
-        info "已添加 ${DEVICE_NAME} 初始化配置"
+        local init_smp_match="board_set_iface_smp_affinity.*;.*case"
+        safe_sed_insert "${init_file}" "${init_smp_match}" "${init_smp_config}" || error "修改SMP亲和性配置失败"
+        info "已添加 ${DEVICE_NAME} 初始化配置到原生init.sh文件"
     else
         warn "${DEVICE_NAME} 初始化配置已存在，跳过"
     fi

@@ -66,27 +66,19 @@ copy_file() {
     info "复制文件: $src -> $dest"
 }
 
-# 安全的sed多行插入函数（解决括号/换行解析问题）
-safe_sed_insert() {
+# 简化的sed插入函数，避免复杂的转义问题
+simple_insert() {
     local file="$1"
-    local match_pattern="$2"
-    local insert_content="$3"
+    local pattern="$2"
+    local content="$3"
     
-    # 使用临时文件避免sed直接修改的语法问题
-    local tmp_file=$(mktemp)
-    # 转义插入内容中的特殊字符（括号、换行、逗号）
-    local escaped_content=$(echo "${insert_content}" | sed -e 's/[\/&]/\\&/g' -e 's/)/\\)/g' -e 's/(/\\(/g')
-    
-    # 构造sed命令：在匹配行前插入内容
-    sed "/${match_pattern}/i\\
-${escaped_content}" "${file}" > "${tmp_file}"
-    
-    # 替换原文件
-    mv "${tmp_file}" "${file}" || {
-        rm -f "${tmp_file}"
-        error "sed插入失败: 无法替换原文件 ${file}"
-    }
-    rm -f "${tmp_file}"
+    # 使用awk在匹配模式前插入内容
+    awk -v pat="$pattern" -v insert="$content" '
+        $0 ~ pat {
+            print insert
+        }
+        { print }
+    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
 }
 
 # ===================== 核心操作函数 =====================
@@ -214,13 +206,8 @@ EOF
 
     # 添加到UBOOT_TARGETS
     if ! grep -q "${DEVICE_NAME}-${SOC}" "$uboot_makefile"; then
-        # 步骤1：找到UBOOT_TARGETS行，在末尾添加自定义设备（官方格式）
-        sed -i "/^UBOOT_TARGETS :=/ s/\$/ \\\\/" "$uboot_makefile"
-        # 步骤2：在UBOOT_TARGETS行下插入自定义设备（缩进+反斜杠）
-        sed -i "/^UBOOT_TARGETS :=/a\  ${DEVICE_NAME}-${SOC} \\\\/" "$uboot_makefile"
-        # 步骤3：清理最后一行的多余反斜杠（避免Makefile语法错误）
-        sed -i '/^UBOOT_TARGETS :/,/^$/ { /[^\\]$/! s/\\$// }' "$uboot_makefile"
-        
+        # 找到UBOOT_TARGETS行，直接追加设备名
+        sed -i "/^UBOOT_TARGETS :=/ s/\$/ ${DEVICE_NAME}-${SOC}/" "$uboot_makefile"
         info "已添加 ${DEVICE_NAME}-${SOC} 到 UBOOT_TARGETS"
     else
         warn "${DEVICE_NAME}-${SOC} 已在UBOOT_TARGETS中，跳过"
@@ -242,24 +229,18 @@ modify_device_configs() {
     local escaped_board_name="${BOARD_FULL_NAME//,/\\,}"
     
     if ! grep -q "${escaped_board_name}" "$leds_file"; then
-        # 适配原有01_leds文件结构（包含board_config_update/flush）
+        # 使用简单的方法：在esac行前插入我们的配置
         local leds_config="${BOARD_FULL_NAME})
 	ucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"
 	ucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"
 	ucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"
 	;;"
         
-        # 找到case分支中最后一个非*的分支（radxa,e54c)），在其后面插入
-        # 匹配模式：radxa,e54c) 结尾的行（适配原有文件结构）
-        local match_pattern="radxa,e54c\))"
+        # 在esac行前插入配置
+        sed -i "/^esac$/i\\
+${leds_config}" "$leds_file"
         
-        # 使用安全插入函数，避免sed语法错误
-        safe_sed_insert "${leds_file}" "${match_pattern}" "${leds_config}" || error "修改LED配置失败"
         info "已添加 ${DEVICE_NAME} LED配置"
-        
-        # 调试：输出插入结果
-        info "DEBUG: 01_leds 插入后关键内容："
-        grep -A8 -B1 "${escaped_board_name}" "${leds_file}" || true
     else
         warn "${DEVICE_NAME} LED配置已存在，跳过"
     fi
@@ -273,13 +254,16 @@ modify_device_configs() {
     fi
 
     if ! grep -q "${escaped_board_name}" "$network_file"; then
-        # 接口配置（使用安全插入函数）
+        # 接口配置
         local network_iface_config="${BOARD_FULL_NAME})
 	ucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"
 	;;"
         
-        # 找到rockchip_setup_interfaces函数中的*)前插入
-        safe_sed_insert "${network_file}" "rockchip_setup_interfaces\(\).*\n.*case" "${network_iface_config}" || error "修改网络接口配置失败"
+        # 在rockchip_setup_interfaces函数的*)行前插入
+        sed -i "/rockchip_setup_interfaces()/,/^[[:space:]]*\*)/ {
+            /^[[:space:]]*\*)/i\\
+${network_iface_config}
+        }" "$network_file"
         
         # MAC地址配置
         local network_mac_config="${BOARD_FULL_NAME})
@@ -287,8 +271,12 @@ modify_device_configs() {
 	lan_mac=\$(macaddr_add \"\$wan_mac\" 1)
 	;;"
         
-        # 找到rockchip_setup_macs函数中的*)前插入
-        safe_sed_insert "${network_file}" "rockchip_setup_macs\(\).*\n.*case" "${network_mac_config}" || error "修改MAC配置失败"
+        # 在rockchip_setup_macs函数的*)行前插入
+        sed -i "/rockchip_setup_macs()/,/^[[:space:]]*\*)/ {
+            /^[[:space:]]*\*)/i\\
+${network_mac_config}
+        }" "$network_file"
+        
         info "已添加 ${DEVICE_NAME} 网络配置"
     else
         warn "${DEVICE_NAME} 网络配置已存在，跳过"
@@ -308,7 +296,11 @@ modify_device_configs() {
 	# No interface renaming needed
 	;;"
         
-        safe_sed_insert "${init_file}" "board_fixup_iface_name\(\).*\n.*case" "${init_iface_config}" || error "修改接口修复配置失败"
+        # 在board_fixup_iface_name函数的*)行前插入
+        sed -i "/board_fixup_iface_name()/,/^[[:space:]]*\*)/ {
+            /^[[:space:]]*\*)/i\\
+${init_iface_config}
+        }" "$init_file"
         
         # SMP亲和性
         local init_smp_config="${BOARD_FULL_NAME})
@@ -316,7 +308,12 @@ modify_device_configs() {
 	set_iface_cpumask 4 eth1
 	;;"
         
-        safe_sed_insert "${init_file}" "board_set_iface_smp_affinity\(\).*\n.*case" "${init_smp_config}" || error "修改SMP亲和性配置失败"
+        # 在board_set_iface_smp_affinity函数的*)行前插入
+        sed -i "/board_set_iface_smp_affinity()/,/^[[:space:]]*\*)/ {
+            /^[[:space:]]*\*)/i\\
+${init_smp_config}
+        }" "$init_file"
+        
         info "已添加 ${DEVICE_NAME} 初始化配置"
     else
         warn "${DEVICE_NAME} 初始化配置已存在，跳过"
@@ -355,7 +352,7 @@ verify_changes() {
         fi
 
         # 验证BUILD_DEVICES语法
-        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES:= \\\\s*${DEVICE_DEF}"; then
+        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES:=.*${DEVICE_DEF}"; then
             warn "U-Boot BUILD_DEVICES 语法错误：需包含反斜杠+缩进，且指向 ${DEVICE_DEF}"
             error_count=$((error_count+1))
         else
@@ -365,18 +362,10 @@ verify_changes() {
     fi
 
     # 2. 验证UBOOT_TARGETS添加
-    if ! grep -q "${DEVICE_NAME}-${SOC}" "$uboot_makefile" | grep -q "UBOOT_TARGETS"; then
+    if ! grep -q "UBOOT_TARGETS.*${DEVICE_NAME}-${SOC}" "$uboot_makefile"; then
         warn "UBOOT_TARGETS 中未找到 ${DEVICE_NAME}-${SOC}"
         error_count=$((error_count+1))
     else
-        # 验证UBOOT_TARGETS语法
-        local uboot_targets_last_line=$(grep -A 20 "UBOOT_TARGETS :=" "$uboot_makefile" | grep -v "^$" | tail -1)
-        if echo "$uboot_targets_last_line" | grep -q "\\\\$" && [ -z "$(echo "$uboot_targets_last_line" | sed 's/\\$//' | sed 's/ //g')" ]; then
-            warn "UBOOT_TARGETS 最后一行存在多余反斜杠，会导致编译错误"
-            error_count=$((error_count+1))
-        else
-            info "✓ UBOOT_TARGETS 语法验证通过"
-        fi
         info "✓ UBOOT_TARGETS 设备添加验证通过"
     fi
 

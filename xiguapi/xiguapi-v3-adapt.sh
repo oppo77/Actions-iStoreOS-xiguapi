@@ -203,7 +203,7 @@ modify_uboot_makefile() {
 define ${uboot_def}
   \$(U-Boot/rk3568/Default)  \# 继承RK3568默认依赖/ATF/TPL配置
   NAME:=Xiguapi V3
-  BUILD_DEVICES:= \          \# 对齐官方格式：单行也保留反斜杠
+  BUILD_DEVICES:= \\
     ${DEVICE_DEF}            \# 对应armv8.mk中的DEVICE_DEF
 endef
 EOF
@@ -346,7 +346,7 @@ verify_changes() {
         fi
 
         # 验证BUILD_DEVICES语法
-        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES:= \\\s*${DEVICE_DEF}"; then
+        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES:= \\s*${DEVICE_DEF}"; then
             warn "U-Boot BUILD_DEVICES 语法错误：需包含反斜杠+缩进，且指向 ${DEVICE_DEF}"
             error_count=$((error_count+1))
         else

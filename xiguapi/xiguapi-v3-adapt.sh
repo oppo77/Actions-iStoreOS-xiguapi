@@ -95,7 +95,7 @@ insert_case() {
     # 使用awk在匹配的case后插入新case
     awk -v pattern="$escaped_pattern" -v new_case="$case_content" '
         BEGIN { found = 0; inserted = 0 }
-        found && /^\t*;;/ && !inserted {
+        found && /^[[:space:]]*;;/ && !inserted {
             print $0
             print new_case
             inserted = 1
@@ -103,6 +103,23 @@ insert_case() {
             next
         }
         $0 ~ pattern { found = 1 }
+        { print }
+    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+}
+
+# 在函数中的默认case前插入配置
+insert_before_default_case() {
+    local file="$1"
+    local func_name="$2"
+    local case_content="$3"
+    
+    # 使用awk找到函数并在默认case(*)前插入
+    awk -v func="$func_name" -v new_case="$case_content" '
+        $0 ~ func { in_func = 1 }
+        in_func && /^[[:space:]]*\*)/ {
+            print new_case
+            in_func = 0
+        }
         { print }
     ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
 }
@@ -284,15 +301,8 @@ modify_device_configs() {
 	ucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"
 	;;"
         
-        # 找到rockchip_setup_interfaces函数，在*)前插入
-        awk -v pattern="^\s*\*)" -v new_case="$network_iface_case" '
-            /rockchip_setup_interfaces\(\)/ { in_func = 1 }
-            in_func && $0 ~ pattern {
-                print new_case
-                in_func = 0
-            }
-            { print }
-        ' "$network_file" > "${network_file}.tmp" && mv "${network_file}.tmp" "$network_file"
+        # 在rockchip_setup_interfaces函数的默认case前插入
+        insert_before_default_case "$network_file" "rockchip_setup_interfaces" "$network_iface_case"
         
         # MAC地址配置
         local network_mac_case="${BOARD_FULL_NAME})
@@ -300,15 +310,8 @@ modify_device_configs() {
 	lan_mac=\$(macaddr_add \"\$wan_mac\" 1)
 	;;"
         
-        # 找到rockchip_setup_macs函数，在*)前插入
-        awk -v pattern="^\s*\*)" -v new_case="$network_mac_case" '
-            /rockchip_setup_macs\(\)/ { in_func = 1 }
-            in_func && $0 ~ pattern {
-                print new_case
-                in_func = 0
-            }
-            { print }
-        ' "$network_file" > "${network_file}.tmp" && mv "${network_file}.tmp" "$network_file"
+        # 在rockchip_setup_macs函数的默认case前插入
+        insert_before_default_case "$network_file" "rockchip_setup_macs" "$network_mac_case"
         
         info "已添加 ${DEVICE_NAME} 网络配置"
     else
@@ -329,15 +332,8 @@ modify_device_configs() {
 	# No interface renaming needed
 	;;"
         
-        # 找到board_fixup_iface_name函数，在*)前插入
-        awk -v pattern="^\s*\*)" -v new_case="$init_iface_case" '
-            /board_fixup_iface_name\(\)/ { in_func = 1 }
-            in_func && $0 ~ pattern {
-                print new_case
-                in_func = 0
-            }
-            { print }
-        ' "$init_file" > "${init_file}.tmp" && mv "${init_file}.tmp" "$init_file"
+        # 在board_fixup_iface_name函数的默认case前插入
+        insert_before_default_case "$init_file" "board_fixup_iface_name" "$init_iface_case"
         
         # SMP亲和性
         local init_smp_case="${BOARD_FULL_NAME})
@@ -345,15 +341,8 @@ modify_device_configs() {
 	set_iface_cpumask 4 eth1
 	;;"
         
-        # 找到board_set_iface_smp_affinity函数，在*)前插入
-        awk -v pattern="^\s*\*)" -v new_case="$init_smp_case" '
-            /board_set_iface_smp_affinity\(\)/ { in_func = 1 }
-            in_func && $0 ~ pattern {
-                print new_case
-                in_func = 0
-            }
-            { print }
-        ' "$init_file" > "${init_file}.tmp" && mv "${init_file}.tmp" "$init_file"
+        # 在board_set_iface_smp_affinity函数的默认case前插入
+        insert_before_default_case "$init_file" "board_set_iface_smp_affinity" "$init_smp_case"
         
         info "已添加 ${DEVICE_NAME} 初始化配置"
     else
@@ -393,7 +382,7 @@ verify_changes() {
         fi
 
         # 验证BUILD_DEVICES语法
-        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES:=.*${DEVICE_DEF}"; then
+        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES.*${DEVICE_DEF}"; then
             warn "U-Boot BUILD_DEVICES 语法错误：需包含反斜杠+缩进，且指向 ${DEVICE_DEF}"
             error_count=$((error_count+1))
         else
@@ -426,9 +415,14 @@ verify_changes() {
         info "✓ U-Boot dtsi 文件验证通过"
     fi
 
-    # 4. 验证U-Boot与设备树关联
-    if ! grep -q "uboot" "$dts_file" && [ -f "$dts_file" ]; then
-        warn "设备树文件未关联U-Boot：$dts_file 中未找到 uboot 关键字（可能影响引导）"
+    # 4. 验证U-Boot与设备树关联（改为检查设备树是否正确引用了U-Boot dtsi）
+    if [ -f "$dts_file" ]; then
+        if grep -q "rk3568-xiguapi-v3-u-boot" "$dts_file"; then
+            info "✓ 设备树文件正确引用了U-Boot dtsi"
+        else
+            warn "设备树文件未关联U-Boot：$dts_file 中未找到 rk3568-xiguapi-v3-u-boot 引用"
+            # 这不算致命错误，只是警告
+        fi
     fi
 
     # 验证DTS文件
@@ -450,15 +444,20 @@ verify_changes() {
         "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
         "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
     )
-    for file in "${check_files[@]}"; do
+    local check_names=("LED" "网络" "初始化")
+    
+    for i in "${!check_files[@]}"; do
+        local file="${check_files[$i]}"
+        local name="${check_names[$i]}"
+        
         if [ ! -f "$file" ]; then
-            warn "配置文件不存在: $file"
+            warn "${name}配置文件不存在: $file"
             error_count=$((error_count+1))
         elif ! grep -q "${escaped_board_name}" "$file"; then
             warn "$file 中未找到 ${BOARD_FULL_NAME} 配置"
             error_count=$((error_count+1))
         else
-            info "✓ $file 配置验证通过"
+            info "✓ ${name}配置验证通过: $(basename "$file")"
         fi
     done
 

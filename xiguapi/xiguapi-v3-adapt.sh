@@ -171,8 +171,6 @@ modify_uboot_makefile() {
     info "===== 4. 修改uboot-rockchip Makefile ====="
     local uboot_makefile="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"
 
-    # 移除备份逻辑（新环境无需备份）
-
     # 添加U-Boot定义
     local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"  # 官方格式：设备名-soc
     if ! grep -q "$uboot_def" "$uboot_makefile"; then
@@ -209,26 +207,45 @@ EOF
 modify_device_configs() {
     info "===== 5. 修改设备配置文件 ====="
     
-    # 修复01_leds配置
+    # 修复01_leds配置（核心修复部分）
     local leds_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
     ensure_dir "$(dirname "$leds_file")"
     [ ! -f "$leds_file" ] && touch "$leds_file" && info "创建空文件: $leds_file"
 
     if ! grep -q "${BOARD_FULL_NAME}" "$leds_file"; then
-        # 用printf构造换行内容，兼容所有sed版本
-        local leds_config=$(printf '%s\n' "${BOARD_FULL_NAME})" \
-            "\tucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"" \
-            "\tucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"" \
-            "\tucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"" \
-            "\t;;")
-        # 插入到esac上方
-        sed -i -e "/^[[:space:]]*esac/i\\
-${leds_config}
-" "$leds_file" || error "修改LED配置失败"
+        # 修复1：去掉冗余转义，正确构造case分支内容（匹配OpenWRT标准语法）
+        local leds_config="    ${BOARD_FULL_NAME})
+        ucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"
+        ucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"
+        ucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"
+        ;;
+"
+        # 修复2：使用GNU sed兼容的插入语法，匹配*)前插入（而非esac）
+        # 先检查文件是否有case结构，无则先创建基础case框架
+        if ! grep -q "^case " "$leds_file"; then
+            cat >> "$leds_file" << 'EOF'
+#!/bin/sh
+. /lib/functions/leds.sh
+. /lib/functions/system.sh
+
+board=$(board_name)
+
+case "$board" in
+    *)
+        # Fallback leds
+        ;;
+esac
+EOF
+            info "01_leds 文件无case结构，已创建基础框架"
+        fi
+
+        # 修复3：sed插入语法（使用-e分表达式，避免换行解析错误）
+        sed -i -e "/^    \*\)/i\\
+${leds_config}" "$leds_file" || error "修改LED配置失败"
         info "已添加 ${DEVICE_NAME} LED配置"
         # 调试：输出插入结果
         info "DEBUG: 01_leds 插入后关键内容："
-        grep -A5 -B1 "${BOARD_FULL_NAME}" "$leds_file" || true
+        grep -A8 -B1 "${BOARD_FULL_NAME}" "$leds_file" || true
     else
         warn "${DEVICE_NAME} LED配置已存在，跳过"
     fi
@@ -239,20 +256,22 @@ ${leds_config}
     [ ! -f "$network_file" ] && touch "$network_file" && info "创建空文件: $network_file"
 
     if ! grep -q "${BOARD_FULL_NAME}" "$network_file"; then
-        # 接口配置
-        local network_iface_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
-            "\t\tucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"" \
-            "\t\t;;")
-        sed -i -e "/rockchip_setup_interfaces()/,/^}/ { /^\s*\*)/i\\
+        # 接口配置（修复sed语法）
+        local network_iface_config="    ${BOARD_FULL_NAME})
+        ucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"
+        ;;
+"
+        sed -i -e "/rockchip_setup_interfaces()/,/^}/ { /^    \*\)/i\\
 ${network_iface_config}
         }" "$network_file" || error "修改网络接口配置失败"
         
-        # MAC地址配置
-        local network_mac_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
-            "\t\twan_mac=\$(generate_mac_from_boot_mmc)" \
-            "\t\tlan_mac=\$(macaddr_add \"\$wan_mac\" 1)" \
-            "\t\t;;")
-        sed -i -e "/rockchip_setup_macs()/,/^}/ { /^\s*\*)/i\\
+        # MAC地址配置（修复sed语法）
+        local network_mac_config="    ${BOARD_FULL_NAME})
+        wan_mac=\$(generate_mac_from_boot_mmc)
+        lan_mac=\$(macaddr_add \"\$wan_mac\" 1)
+        ;;
+"
+        sed -i -e "/rockchip_setup_macs()/,/^}/ { /^    \*\)/i\\
 ${network_mac_config}
         }" "$network_file" || error "修改MAC配置失败"
         info "已添加 ${DEVICE_NAME} 网络配置"
@@ -266,20 +285,22 @@ ${network_mac_config}
     [ ! -f "$init_file" ] && touch "$init_file" && info "创建空文件: $init_file"
 
     if ! grep -q "${BOARD_FULL_NAME}" "$init_file"; then
-        # 接口修复
-        local init_iface_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
-            "\t\t# No interface renaming needed" \
-            "\t\t;;")
-        sed -i -e "/board_fixup_iface_name()/,/^}/ { /^\s*\*)/i\\
+        # 接口修复（修复sed语法）
+        local init_iface_config="    ${BOARD_FULL_NAME})
+        # No interface renaming needed
+        ;;
+"
+        sed -i -e "/board_fixup_iface_name()/,/^}/ { /^    \*\)/i\\
 ${init_iface_config}
         }" "$init_file" || error "修改接口修复配置失败"
         
-        # SMP亲和性
-        local init_smp_config=$(printf '%s\n' "\t${BOARD_FULL_NAME})" \
-            "\t\tset_iface_cpumask 2 eth0" \
-            "\t\tset_iface_cpumask 4 eth1" \
-            "\t\t;;")
-        sed -i -e "/board_set_iface_smp_affinity()/,/^}/ { /^\s*\*)/i\\
+        # SMP亲和性（修复sed语法）
+        local init_smp_config="    ${BOARD_FULL_NAME})
+        set_iface_cpumask 2 eth0
+        set_iface_cpumask 4 eth1
+        ;;
+"
+        sed -i -e "/board_set_iface_smp_affinity()/,/^}/ { /^    \*\)/i\\
 ${init_smp_config}
         }" "$init_file" || error "修改SMP亲和性配置失败"
         info "已添加 ${DEVICE_NAME} 初始化配置"

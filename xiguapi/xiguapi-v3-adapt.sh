@@ -51,37 +51,6 @@ ensure_dir() {
     fi
 }
 
-# 验证OpenWRT原生文件存在且结构合法
-validate_original_file() {
-    local file="$1"
-    local file_desc="$2"
-    local required_patterns="${3:-}"
-
-    # 第一步：校验文件存在性
-    if [ ! -f "$file" ]; then
-        error "${file_desc}文件缺失：$file
-请检查OpenWRT源码完整性，该文件是rockchip/armv8平台原生文件，不可手动创建空文件！"
-    fi
-
-    # 第二步：校验文件基本结构（可选，传入required_patterns时生效）
-    if [ -n "$required_patterns" ]; then
-        local missing_patterns=()
-        IFS="|" read -ra patterns <<< "$required_patterns"
-        for pattern in "${patterns[@]}"; do
-            if ! grep -q "$pattern" "$file"; then
-                missing_patterns+=("$pattern")
-            fi
-        done
-        if [ ${#missing_patterns[@]} -gt 0 ]; then
-            error "${file_desc}文件结构异常：缺失关键内容 ${missing_patterns[*]}
-文件路径：$file
-请确认该文件是OpenWRT rockchip/armv8平台的原生文件！"
-        fi
-    fi
-
-    info "✓ ${file_desc}文件验证通过：$file"
-}
-
 # 简化：移除备份逻辑，仅保留文件复制
 copy_file() {
     local src="$1"
@@ -103,21 +72,16 @@ safe_sed_insert() {
     local match_pattern="$2"
     local insert_content="$3"
     
-    # 先校验匹配模式是否存在（避免插入到错误位置）
-    if ! grep -q "$match_pattern" "$file"; then
-        error "插入失败：文件 $file 中未找到匹配模式 '$match_pattern'，无法定位插入位置"
-    fi
-
     # 使用临时文件避免sed直接修改的语法问题
     local tmp_file=$(mktemp)
     # 转义插入内容中的特殊字符（括号、换行、逗号）
     local escaped_content=$(echo "${insert_content}" | sed -e 's/[\/&]/\\&/g' -e 's/)/\\)/g' -e 's/(/\\(/g')
     
-    \# 构造sed命令：在匹配行前插入内容
+    # 构造sed命令：在匹配行前插入内容
     sed "/${match_pattern}/i\\
 ${escaped_content}" "${file}" > "${tmp_file}"
     
-    \# 替换原文件
+    # 替换原文件
     mv "${tmp_file}" "${file}" || {
         rm -f "${tmp_file}"
         error "sed插入失败: 无法替换原文件 ${file}"
@@ -125,13 +89,13 @@ ${escaped_content}" "${file}" > "${tmp_file}"
     rm -f "${tmp_file}"
 }
 
-\# ===================== 核心操作函数 =====================
+# ===================== 核心操作函数 =====================
 init_check() {
     info "===== 1. 初始化检查 ====="
     info "脚本目录: ${SCRIPT_DIR}"
     info "源码根目录: ${SOURCE_ROOT_DIR}"
 
-    \# 检查关键设备文件
+    # 检查关键设备文件
     local required_files=(
         "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts"
         "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3_defconfig"
@@ -144,21 +108,18 @@ init_check() {
     done
     info "所有必需设备文件验证通过"
 
-    \# 新增：检查U-Boot核心依赖（rk3568 Default定义是否存在）
+    # 新增：检查U-Boot核心依赖（rk3568 Default定义是否存在）
     local uboot_default_def="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"
-    validate_original_file "$uboot_default_def" "U-Boot Makefile" "define U-Boot/rk3568/Default"
+    if ! grep -q "define U-Boot/rk3568/Default" "$uboot_default_def"; then
+        error "U-Boot核心依赖缺失：未找到 U-Boot/rk3568/Default 定义，请检查uboot-rockchip包是否完整"
+    fi
     info "U-Boot rk3568 Default 依赖验证通过"
 
-    \# 提前校验OpenWRT核心配置文件（避免后续操作失败）
-    validate_original_file "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds" "LED配置文件" "board_config_update|case \$board in|radxa,e54c))"
-    validate_original_file "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network" "网络配置文件" "rockchip_setup_interfaces|rockchip_setup_macs"
-    validate_original_file "${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh" "初始化配置文件" "board_fixup_iface_name|board_set_iface_smp_affinity"
-
-    \# 切换工作目录到源码根目录
+    # 切换工作目录到源码根目录
     cd "${SOURCE_ROOT_DIR}" || error "无法进入源码根目录: ${SOURCE_ROOT_DIR}"
     info "当前工作目录: $(pwd)"
 
-    \# 脚本执行权限检查
+    # 脚本执行权限检查
     if [ ! -x "${BASH_SOURCE[0]}" ]; then
         warn "脚本无执行权限，自动添加..."
         chmod +x "${BASH_SOURCE[0]}" || error "添加执行权限失败"
@@ -168,7 +129,7 @@ init_check() {
 copy_device_files() {
     info "===== 2. 复制设备文件 ====="
     
-    \# 补全所有目标路径为绝对路径
+    # 补全所有目标路径为绝对路径
     local dts_dest="${SOURCE_ROOT_DIR}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
     copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3.dts" "$dts_dest"
 
@@ -178,7 +139,7 @@ copy_device_files() {
     local dtsi_dest="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
     copy_file "${DEVICE_FILES_DIR}/rk3568-xiguapi-v3-u-boot.dtsi" "$dtsi_dest"
 
-    \# 验证U-Boot文件复制完整性
+    # 验证U-Boot文件复制完整性
     info "===== 验证U-Boot文件复制结果 ====="
     local uboot_copy_files=(
         "$defconfig_dest"
@@ -198,18 +159,21 @@ copy_device_files() {
 modify_armv8_mk() {
     info "===== 3. 修改armv8.mk ====="
     local armv8_mk="${SOURCE_ROOT_DIR}/target/linux/rockchip/image/armv8.mk"
-    validate_original_file "$armv8_mk" "armv8.mk设备定义文件" "define Device/"
+    local armv8_dir=$(dirname "$armv8_mk")
 
-    \# 避免重复添加
+    # 确保目录存在
+    ensure_dir "$armv8_dir"
+
+    # 避免重复添加
     if grep -q "define Device/${DEVICE_DEF}" "$armv8_mk"; then
         warn "${DEVICE_DEF} 已存在于 armv8.mk，跳过追加"
         return
     fi
 
-    \# 添加设备定义
+    # 添加设备定义
     cat >> "$armv8_mk" << EOF
 
-\# Added for Xiguapi V3 (rk3568)
+# Added for Xiguapi V3 (rk3568)
 define Device/${DEVICE_DEF}
   DEVICE_VENDOR := NLNET
   DEVICE_MODEL := Xiguapi V3
@@ -229,19 +193,18 @@ EOF
 modify_uboot_makefile() {
     info "===== 4. 修改uboot-rockchip Makefile ====="
     local uboot_makefile="${SOURCE_ROOT_DIR}/package/boot/uboot-rockchip/Makefile"
-    validate_original_file "$uboot_makefile" "uboot-rockchip Makefile" "UBOOT_TARGETS :="
 
-    \# 添加U-Boot定义
-    local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"  \# 官方格式：设备名-soc
+    # 添加U-Boot定义（官方格式：设备名-soc）
+    local uboot_def="U-Boot/${DEVICE_NAME}-${SOC}"
     if ! grep -q "$uboot_def" "$uboot_makefile"; then
         cat >> "$uboot_makefile" << EOF
 
-\# Added for Xiguapi V3 (rk3568)
+# Added for Xiguapi V3 (rk3568)
 define ${uboot_def}
-  \$(U-Boot/rk3568/Default)  \# 继承RK3568默认依赖/ATF/TPL配置
+  \$(U-Boot/rk3568/Default)  # 继承RK3568默认依赖/ATF/TPL配置
   NAME:=Xiguapi V3
   BUILD_DEVICES:= \\
-    ${DEVICE_DEF}            \# 对应armv8.mk中的DEVICE_DEF
+    ${DEVICE_DEF}            # 对应armv8.mk中的DEVICE_DEF
 endef
 EOF
         info "已添加 ${uboot_def} 定义（继承RK3568默认配置）"
@@ -249,13 +212,13 @@ EOF
         warn "${uboot_def} 已存在，跳过"
     fi
 
-    \# 添加到UBOOT_TARGETS
+    # 添加到UBOOT_TARGETS
     if ! grep -q "${DEVICE_NAME}-${SOC}" "$uboot_makefile"; then
-        \# 步骤1：找到UBOOT_TARGETS行，在末尾添加自定义设备（官方格式）
-        sed -i "/^UBOOT_TARGETS :=/ s/\$/ \\/" "$uboot_makefile"
-        \# 步骤2：在UBOOT_TARGETS行下插入自定义设备（缩进+反斜杠）
-        sed -i "/^UBOOT_TARGETS :=/a\  ${DEVICE_NAME}-${SOC} \\" "$uboot_makefile"
-        \# 步骤3：清理最后一行的多余反斜杠（避免Makefile语法错误）
+        # 步骤1：找到UBOOT_TARGETS行，在末尾添加自定义设备（官方格式）
+        sed -i "/^UBOOT_TARGETS :=/ s/\$/ \\\\/" "$uboot_makefile"
+        # 步骤2：在UBOOT_TARGETS行下插入自定义设备（缩进+反斜杠）
+        sed -i "/^UBOOT_TARGETS :=/a\  ${DEVICE_NAME}-${SOC} \\\\/" "$uboot_makefile"
+        # 步骤3：清理最后一行的多余反斜杠（避免Makefile语法错误）
         sed -i '/^UBOOT_TARGETS :/,/^$/ { /[^\\]$/! s/\\$// }' "$uboot_makefile"
         
         info "已添加 ${DEVICE_NAME}-${SOC} 到 UBOOT_TARGETS"
@@ -267,28 +230,32 @@ EOF
 modify_device_configs() {
     info "===== 5. 修改设备配置文件 ====="
     
-    \# 修复01_leds配置（核心修复部分）
+    # 修复01_leds配置（核心修复部分）
     local leds_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/01_leds"
-    \# 已在init_check中校验过文件存在性和结构，无需再touch
     
-    \# 转义BOARD_FULL_NAME中的逗号（避免sed匹配错误）
+    # 检查文件是否存在，如果不存在则报错而不是创建空文件
+    if [ ! -f "$leds_file" ]; then
+        error "LED配置文件不存在: $leds_file。请确保OpenWRT源码完整"
+    fi
+
+    # 转义BOARD_FULL_NAME中的逗号（避免sed匹配错误）
     local escaped_board_name="${BOARD_FULL_NAME//,/\\,}"
     
     if ! grep -q "${escaped_board_name}" "$leds_file"; then
-        \# 适配原有01_leds文件结构（包含board_config_update/flush）
+        # 适配原有01_leds文件结构（包含board_config_update/flush）
         local leds_config="${BOARD_FULL_NAME})
 	ucidef_set_led_default \"power\" \"POWER\" \"blue:power\" \"1\"
 	ucidef_set_led_netdev \"status\" \"STATUS\" \"blue:status\" \"eth0\"
 	ucidef_set_led_netdev \"network\" \"NETWORK\" \"blue:network\" \"eth1\"
 	;;"
         
-        \# 找到case分支中最后一个非*的分支（radxa,e54c)），在其后面插入
-        \# 匹配模式：radxa,e54c) 结尾的行（适配原有文件结构）
+        # 找到case分支中最后一个非*的分支（radxa,e54c)），在其后面插入
+        # 匹配模式：radxa,e54c) 结尾的行（适配原有文件结构）
         local match_pattern="radxa,e54c\))"
         
         # 使用安全插入函数，避免sed语法错误
         safe_sed_insert "${leds_file}" "${match_pattern}" "${leds_config}" || error "修改LED配置失败"
-        info "已添加 ${DEVICE_NAME} LED配置到原生01_leds文件"
+        info "已添加 ${DEVICE_NAME} LED配置"
         
         # 调试：输出插入结果
         info "DEBUG: 01_leds 插入后关键内容："
@@ -299,7 +266,11 @@ modify_device_configs() {
 
     # 修改02_network配置
     local network_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
-    # 已在init_check中校验过文件存在性和结构，无需再touch
+    
+    # 检查文件是否存在
+    if [ ! -f "$network_file" ]; then
+        error "网络配置文件不存在: $network_file。请确保OpenWRT源码完整"
+    fi
 
     if ! grep -q "${escaped_board_name}" "$network_file"; then
         # 接口配置（使用安全插入函数）
@@ -307,11 +278,8 @@ modify_device_configs() {
 	ucidef_set_interfaces_lan_wan \"eth0\" \"eth1\"
 	;;"
         
-        # 找到rockchip_setup_interfaces函数中的case行插入
-        local iface_match_pattern="rockchip_setup_interfaces\(\).*\n.*case"
-        # 转换为sed可匹配的单行模式（适配换行）
-        iface_match_pattern="rockchip_setup_interfaces.*;.*case"
-        safe_sed_insert "${network_file}" "${iface_match_pattern}" "${network_iface_config}" || error "修改网络接口配置失败"
+        # 找到rockchip_setup_interfaces函数中的*)前插入
+        safe_sed_insert "${network_file}" "rockchip_setup_interfaces\(\).*\n.*case" "${network_iface_config}" || error "修改网络接口配置失败"
         
         # MAC地址配置
         local network_mac_config="${BOARD_FULL_NAME})
@@ -319,18 +287,20 @@ modify_device_configs() {
 	lan_mac=\$(macaddr_add \"\$wan_mac\" 1)
 	;;"
         
-        # 找到rockchip_setup_macs函数中的case行插入
-        local mac_match_pattern="rockchip_setup_macs\(\).*\n.*case"
-        mac_match_pattern="rockchip_setup_macs.*;.*case"
-        safe_sed_insert "${network_file}" "${mac_match_pattern}" "${network_mac_config}" || error "修改MAC配置失败"
-        info "已添加 ${DEVICE_NAME} 网络配置到原生02_network文件"
+        # 找到rockchip_setup_macs函数中的*)前插入
+        safe_sed_insert "${network_file}" "rockchip_setup_macs\(\).*\n.*case" "${network_mac_config}" || error "修改MAC配置失败"
+        info "已添加 ${DEVICE_NAME} 网络配置"
     else
         warn "${DEVICE_NAME} 网络配置已存在，跳过"
     fi
 
     # 修改init.sh配置
     local init_file="${SOURCE_ROOT_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
-    # 已在init_check中校验过文件存在性和结构，无需再touch
+    
+    # 检查文件是否存在
+    if [ ! -f "$init_file" ]; then
+        error "初始化配置文件不存在: $init_file。请确保OpenWRT源码完整"
+    fi
 
     if ! grep -q "${escaped_board_name}" "$init_file"; then
         # 接口修复
@@ -338,8 +308,7 @@ modify_device_configs() {
 	# No interface renaming needed
 	;;"
         
-        local init_iface_match="board_fixup_iface_name.*;.*case"
-        safe_sed_insert "${init_file}" "${init_iface_match}" "${init_iface_config}" || error "修改接口修复配置失败"
+        safe_sed_insert "${init_file}" "board_fixup_iface_name\(\).*\n.*case" "${init_iface_config}" || error "修改接口修复配置失败"
         
         # SMP亲和性
         local init_smp_config="${BOARD_FULL_NAME})
@@ -347,9 +316,8 @@ modify_device_configs() {
 	set_iface_cpumask 4 eth1
 	;;"
         
-        local init_smp_match="board_set_iface_smp_affinity.*;.*case"
-        safe_sed_insert "${init_file}" "${init_smp_match}" "${init_smp_config}" || error "修改SMP亲和性配置失败"
-        info "已添加 ${DEVICE_NAME} 初始化配置到原生init.sh文件"
+        safe_sed_insert "${init_file}" "board_set_iface_smp_affinity\(\).*\n.*case" "${init_smp_config}" || error "修改SMP亲和性配置失败"
+        info "已添加 ${DEVICE_NAME} 初始化配置"
     else
         warn "${DEVICE_NAME} 初始化配置已存在，跳过"
     fi
@@ -387,7 +355,7 @@ verify_changes() {
         fi
 
         # 验证BUILD_DEVICES语法
-        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES:= \\s*${DEVICE_DEF}"; then
+        if ! grep -A5 "$uboot_def" "$uboot_makefile" | grep -q "BUILD_DEVICES:= \\\\s*${DEVICE_DEF}"; then
             warn "U-Boot BUILD_DEVICES 语法错误：需包含反斜杠+缩进，且指向 ${DEVICE_DEF}"
             error_count=$((error_count+1))
         else
@@ -403,7 +371,7 @@ verify_changes() {
     else
         # 验证UBOOT_TARGETS语法
         local uboot_targets_last_line=$(grep -A 20 "UBOOT_TARGETS :=" "$uboot_makefile" | grep -v "^$" | tail -1)
-        if echo "$uboot_targets_last_line" | grep -q "\\\\$" && [ -z "$(echo "$uboot_targets_last_line" | sed 's/\\$//' | sed 's/ //g')"; then
+        if echo "$uboot_targets_last_line" | grep -q "\\\\$" && [ -z "$(echo "$uboot_targets_last_line" | sed 's/\\$//' | sed 's/ //g')" ]; then
             warn "UBOOT_TARGETS 最后一行存在多余反斜杠，会导致编译错误"
             error_count=$((error_count+1))
         else

@@ -20,16 +20,7 @@ DTS_CHECK_PATH="${OPENWRT_ROOT}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-
 UBOOT_MAKEFILE_CHECK_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/Makefile"
 UBOOT_CONFIG_CHECK_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/configs/rk3568-xiguapi-v3_defconfig"
 UBOOT_DTSI_CHECK_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
-
-# 添加nlnet_xiguapi-v3
-echo -e "\\ndefine Device/nlnet_xiguapi-v3
-\$(call Device/Legacy/rk3568,\$(1))
-  DEVICE_VENDOR := NLNET
-  DEVICE_MODEL := Xiguapi V3
-  DEVICE_DTS := rk3568/rk3568-xiguapi-v3
-  DEVICE_PACKAGES += kmod-r8169
-endef
-TARGET_DEVICES += nlnet_xiguapi-v3 >> target/linux/rockchip/image/legacy.mk
+LEGACY_MK_PATH="${OPENWRT_ROOT}/target/linux/rockchip/image/legacy.mk"
 
 # 3. 辅助函数
 check_file() {
@@ -53,15 +44,23 @@ check_dir() {
 }
 
 # 4. 清理残留的侵入式修改
-echo -e "\n【1/4】清理可能的残留侵入式修改..."
+echo -e "\n【1/6】清理可能的残留侵入式修改..."
 cd "${OPENWRT_ROOT}"
-# 清理可能的旧配置片段
+
+# 清理可能的旧UBoot配置片段
 sed -i '/define U-Boot\/xiguapi-v3-rk3568/,/endef/ d' "${UBOOT_MAKEFILE_CHECK_PATH}" 2>/dev/null || true
 sed -i '/xiguapi-v3-rk3568 \\/d' "${UBOOT_MAKEFILE_CHECK_PATH}" 2>/dev/null || true
+
+# 清理旧的设备定义（如果存在）
+if [ -f "${LEGACY_MK_PATH}" ]; then
+    sed -i '/define Device\/nlnet_xiguapi-v3/,/endef/d' "${LEGACY_MK_PATH}" 2>/dev/null || true
+    sed -i '/TARGET_DEVICES += nlnet_xiguapi-v3/d' "${LEGACY_MK_PATH}" 2>/dev/null || true
+fi
+
 echo -e "✅ 已清理源码中残留的侵入式配置"
 
 # 5. 检查自定义配置目录和核心文件
-echo -e "\n【2/4】检查自定义配置核心文件..."
+echo -e "\n【2/6】检查自定义配置核心文件..."
 check_dir "${CUSTOM_CONFIG_DIR}" "自定义配置根目录"
 
 required_files=(
@@ -78,7 +77,7 @@ done
 echo -e "✅ 自定义配置核心文件检查通过"
 
 # 6. 部署自定义配置到 OpenWRT 源码
-echo -e "\n【3/4】部署自定义配置到 OpenWRT 源码..."
+echo -e "\n【3/6】部署自定义配置到 OpenWRT 源码..."
 # 创建必要的目标目录
 mkdir -p "$(dirname "${DTS_CHECK_PATH}")"
 mkdir -p "$(dirname "${UBOOT_MAKEFILE_CHECK_PATH}")"
@@ -94,9 +93,34 @@ cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-
 echo -e "✅ 自定义配置部署完成"
 echo -e "  📍 主设备树：${DTS_CHECK_PATH}"
 echo -e "  📍 UBoot Makefile：${UBOOT_MAKEFILE_CHECK_PATH}"
+echo -e "  📍 UBoot 配置：${UBOOT_CONFIG_CHECK_PATH}"
+echo -e "  📍 UBoot DTSI：${UBOOT_DTSI_CHECK_PATH}"
 
-# 7. 验证自定义配置部署结果
-echo -e "\n【4/4】验证自定义配置部署结果..."
+# 7. 添加nlnet_xiguapi-v3设备定义
+echo -e "\n【4/6】添加设备定义到 legacy.mk 文件..."
+
+# 确保legacy.mk文件存在
+if [ ! -f "${LEGACY_MK_PATH}" ]; then
+    echo -e "⚠️  legacy.mk 文件不存在，将创建"
+    mkdir -p "$(dirname "${LEGACY_MK_PATH}")"
+    touch "${LEGACY_MK_PATH}"
+fi
+
+# 添加新的设备定义
+echo -e "
+define Device/nlnet_xiguapi-v3
+  \$(call Device/Legacy/rk3568,\$(1))
+  DEVICE_VENDOR := NLNET
+  DEVICE_MODEL := Xiguapi V3
+  DEVICE_DTS := rk3568/rk3568-xiguapi-v3
+  DEVICE_PACKAGES += kmod-r8169
+endef
+TARGET_DEVICES += nlnet_xiguapi-v3" >> "${LEGACY_MK_PATH}"
+
+echo -e "✅ 设备定义已添加到 legacy.mk"
+
+# 8. 验证自定义配置部署结果
+echo -e "\n【5/6】验证自定义配置部署结果..."
 verify_pass=0
 
 # 检查关键文件是否存在
@@ -107,14 +131,12 @@ else
     verify_pass=1
 fi
 
-
 if [ -f "${UBOOT_MAKEFILE_CHECK_PATH}" ]; then
     echo -e "✅ UBoot Makefile 部署成功"
 else
     echo -e "❌ UBoot Makefile 部署失败"
     verify_pass=1
 fi
-
 
 # 快速验证UBoot配置是否包含
 if grep -q "rk3568-xiguapi-v3" "${UBOOT_MAKEFILE_CHECK_PATH}" 2>/dev/null; then
@@ -124,12 +146,31 @@ else
     verify_pass=1
 fi
 
-# 最终结果
+# 验证legacy.mk是否添加成功
+if [ -f "${LEGACY_MK_PATH}" ]; then
+    if grep -q "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}"; then
+        echo -e "✅ legacy.mk 中已添加 nlnet_xiguapi-v3 设备定义"
+        echo -e "\n📄 展示 legacy.mk 中包含 nlnet_xiguapi-v3 的上下文（前后19行）："
+        echo -e "=========================================="
+        grep -n -A 19 -B 19 "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}" 2>/dev/null || echo "未找到相关行"
+        echo -e "=========================================="
+    else
+        echo -e "❌ legacy.mk 中未找到 nlnet_xiguapi-v3 设备定义"
+        verify_pass=1
+    fi
+else
+    echo -e "❌ legacy.mk 文件不存在: ${LEGACY_MK_PATH}"
+    verify_pass=1
+fi
+
+# 9. 最终结果
+echo -e "\n【6/6】适配结果汇总..."
 if [ ${verify_pass} -eq 0 ]; then
     echo -e "\n🎉 Xiguapi V3 设备适配成功！"
     echo -e "=========================================="
     echo -e "✅ 设备树文件已部署"
     echo -e "✅ UBoot配置已更新"
+    echo -e "✅ 设备定义已添加到 legacy.mk"
     echo -e "=========================================="
     echo -e "📋 说明："
     echo -e "  - 此脚本仅完成硬件适配"

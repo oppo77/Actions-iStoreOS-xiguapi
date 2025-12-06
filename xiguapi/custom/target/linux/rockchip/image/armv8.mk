@@ -195,14 +195,13 @@ TARGET_DEVICES += radxa_rock-3b
 
 
 define Device/nlnet_xiguapi-v3
-  DEVICE_VENDOR := NLNET
-  DEVICE_MODEL := Xiguapi V3
+  DEVICE_VENDOR := NLnet
+  DEVICE_MODEL := XiGuaPi V3
   SOC := rk3568
-  DEVICE_DTS := rockchip/rk3568-xiguapi-v3
   UBOOT_DEVICE_NAME := rk3568-xiguapi-v3
   KERNEL_LOADADDR := 0x04000000
-  BOOT_SCRIPT := rockchip
-  DEVICE_PACKAGES := kmod-r8169
+  DEVICE_PACKAGES := kmod-r8169 kmod-hwmon-pwmfan
+  IMAGE/sysupgrade.img.gz := boot-common | boot-script | pine64-img | gzip | append-metadata
 endef
 TARGET_DEVICES += nlnet_xiguapi-v3
 

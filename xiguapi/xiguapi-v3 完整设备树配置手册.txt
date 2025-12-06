@@ -1,0 +1,326 @@
+xiaguapi-v3 完整设备树配置手册（基于 RK3568 硬件设计）
+一、平台与 CPU 核心信息
+1. 核心架构与硬件型号
+CPU 架构：ARM 64 位，四核 ARM Cortex-A55，最高主频 1.8GHz，支持动态调频（如 1.2GHz 低功耗模式）。
+SOC 型号：Rockchip RK3568，compatible = "rockchip,rk3568", "rockchip,rk356x";（前者精确匹配，后者兼容 RK356x 系列驱动）。
+电源管理芯片（PMIC）：RK817-5（兼容 RK808h），compatible = "rockchip,rk817", "rockchip,rk808";，负责系统核心电源分配与时序控制，外部扩展 DC-DC 转换器提供 5G 模块专用 3.8V 供电（RK817 无 3.7V/3.8V 直接输出，需外部降压实现）。
+内存（RAM）：4GB LPDDR4X，长鑫 CXMT CXDB5CCBM-MK-A，起始地址0x80000000，时钟频率 2133MHz（由 PLL_DDR 提供，不分频）。
+存储（ROM）：32GB eMMC 5.1，闪迪 SanDisk SDINBDA4-32G，挂载于 RK3568 eMMC 控制器（寄存器地址0xFFC10000-0xFFC17FFF），优先作为启动设备，备选启动为 TF 卡（SDMMC2 接口）。
+二、引脚复用表（外设 - GPIO 映射与功能）
+1. UART 外设
+Debug UART2：调试串口，UART2_TX→GPIO1_A6（RK_FUNC_1），UART2_RX→GPIO1_A7（RK_FUNC_1），默认波特率 115200bps，无上下拉（&pcfg_pull_none），用于系统调试输出。
+UART9_M1：5G 模块调试 / 数据串口，UART9_TX_M1→GPIO2_B2（RK_FUNC_2），UART9_RX_M1→GPIO2_B3（RK_FUNC_2），支持最高 4Mbps 波特率，无上下拉。
+2. CAN 外设
+CAN1_M1：CAN 总线接口，CAN1_TX_M1→GPIO2_B5（RK_FUNC_2），CAN1_RX_M1→GPIO2_B4（RK_FUNC_2），支持 CAN 2.0A/B 协议，中断下降沿触发。
+3. PWM 外设
+PWM5（LED A 调光）：GPIO1_C1（RK_FUNC_2），默认 1KHz 频率（24MHz PLL_PWM 分频 24000），用于 LED 亮度调节，无上下拉。
+PWM14_M0（风扇调速）：GPIO3_D6（RK_FUNC_1），默认 25KHz 频率（24MHz PLL_PWM 分频 960），关联 SARADC 温度检测动态调占空比，无上下拉。
+PWM15_M0（备用）：GPIO3_D7（RK_FUNC_1），预留扩展，无上下拉。
+4. 按键外设
+Reset_Key（重启）：GPIO0_A0（RK_FUNC_0），上拉（&pcfg_pull_up），中断下降沿触发（IRQ_TYPE_EDGE_FALLING），复位时间≥10ms。
+刷机键（刷机模式）：GPIO4_D2（RK_FUNC_0），上拉，中断下降沿触发，长按进入 TF 卡启动。
+PowerOn/OFF_Key（开关机 / 恢复）：GPIO0_A1（RK_FUNC_0），上拉，中断双边沿触发（IRQ_TYPE_EDGE_BOTH），长按 3s 开关机、短按 1s 触发恢复。
+5. LCD 外设
+LCD 数据（LCD_D0~D23）：LCD_D0→GPIO5_A0、LCD_D1→GPIO5_A1、……、LCD_D23→GPIO5_F7，均为RK_FUNC_3，上拉（&pcfg_pull_up）。
+LCD 控制：LCD_CLK→GPIO6_A0（RK_FUNC_3）、LCDC_HSYNC→GPIO6_A1（RK_FUNC_3）、LCDC_VSYNC→GPIO6_A2（RK_FUNC_3）、LCD_DE→GPIO6_A3（RK_FUNC_3），上拉，高电平有效。
+6. HDMI 外设
+HDMITX_SCL：GPIO2_C0（RK_FUNC_2），无上下拉，用于 HDMI I2C 通信（读取 EDID）。
+HDMITX_SDA：GPIO2_C1（RK_FUNC_2），无上下拉，与 SCL 配合。
+HDMITX_CEC_M0：GPIO2_C2（RK_FUNC_2），无上下拉，支持 HDMI-CEC 设备联动。
+7. I2C 外设
+I2C2_SDA_M1：GPIO2_D0（RK_FUNC_1），无上下拉，挂载 GC9307 显示屏驱动。
+I2C2_SCL_M1：GPIO2_D1（RK_FUNC_1），无上下拉，I2C2 总线时钟，默认 100KHz。
+8. SPI 外设
+SPI 显示屏片选（CS）：GPIO3_A0（RK_FUNC_0），上拉（&pcfg_pull_up），低电平有效，控制 GC9307 片选。
+SPI_CLK：GPIO3_A1（RK_FUNC_1），无上下拉，20MHz（100MHz PLL_SPI 分频 5，匹配 GC9307 最大规格），驱动强度 3 档（&pcfg_pull_none_drv3）。
+SPI_MOSI：GPIO3_A2（RK_FUNC_1），无上下拉，驱动强度 3 档（&pcfg_pull_none_drv3），数据传输。
+三、总线信息
+1. PCIe 总线
+版本与控制器：PCIe2.0/3.0，compatible = "rockchip,rk3568-pcie"，寄存器地址0xFF000000-0xFF100000，中断GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH。
+挂载设备与控制引脚：
+MINIPCIE-1：复位GPIO3_A1（低电平 100ms），电源使能GPIO3_A2（高电平），支持 PCIe WiFi 网卡。
+MINIPCIE-2：复位GPIO3_A3（低电平 100ms），电源使能GPIO3_A4（高电平），独立供电。
+M.2 E Key（MT7916 WiFi）：复位GPIO3_A5（低电平 200ms），电源使能GPIO3_A6（高电平），PCIe 连接（非 SDIO）。
+M.2 B Key（5G 模块）：PCIe 信号 + UART9 联动，电源由 RK817（4.2V 前级）+ 外部 DC-DC（3.8V 专用）协同控制，序列见 “电压调节” 部分。
+关键属性：总线范围0x0000:00-0x0000:01，MSI 中断，时钟源PLL_PCIE（100MHz 参考时钟）。
+2. I2C 总线
+I2C0（PMIC 专用）：寄存器地址0xFF720000-0xFF721000，挂载 RK817（7 位地址0x18，A0/A1 接 GND），compatible = "rockchip,rk3568-i2c"。
+I2C2（板级扩展）：寄存器地址0xFF730000-0xFF731000，挂载 GC9307（7 位地址0x36，A0 接 GND）、HDMI CEC 控制器（0x4C），默认 100KHz（24MHz PLL_I2C 分频 240）。
+3. SPI 总线
+SPI 主机（显示屏专用）：寄存器地址0xFF750000-0xFF751000，compatible = "rockchip,rk3568-spi"，时钟 20MHz（100MHz PLL_SPI 分频 5），片选GPIO3_A0，挂载 GC9307（compatible = "ilitek,gc9307", "rockchip,spi-lcd"）。
+4. UART 总线
+UART2（Debug）：寄存器地址0xFF760000-0xFF761000，compatible = "rockchip,rk3568-uart"，115200bps。
+UART9（5G）：寄存器地址0xFF770000-0xFF771000，compatible = "rockchip,rk3568-uart"，支持 4Mbps。
+5. USB 总线
+USB3.0 OTG0：寄存器地址0xFF900000-0xFF90FFFF，compatible = "rockchip,rk3568-xhci"，中断IRQ 76，支持主机 / 设备模式切换（USB3_OTG0_VBUSDET信号关联）。
+USB2.0 HOST2/3：寄存器地址0xFF920000-0xFF92FFFF，compatible = "rockchip,rk3568-ehci"，中断IRQ 77，纯主机模式，供 USB2.0 外设。
+四、内存映射外设
+1. GPIO 控制器
+寄存器地址：GPIO0（0xFF720000-0xFF72FFFF）、GPIO1（0xFF730000-0xFF73FFFF）等，每个 Bank 64KB，compatible = "rockchip,rk3568-gpio"。
+关键功能：支持输入 / 输出 / 中断模式，关联外设引脚见 “引脚复用表”，如按键中断、片选控制。
+2. 中断控制器（GIC-500）
+compatible："arm,gic-v3", "arm,gic-500"，寄存器地址0xFF840000-0xFF84FFFF，长度 64KB。
+中断类型与映射：
+按键（Reset_Key / 刷机键）：IRQ_TYPE_EDGE_FALLING/IRQ_TYPE_EDGE_BOTH，中断号GPIO0_A0（IRQ 0）、GPIO4_D2（IRQ 68）。
+以太网 PHY（RTL8211F）：IRQ_TYPE_LEVEL_HIGH，网口 1（IRQ 89）、网口 2（IRQ 90），compatible = "realtek,rtl8211f", "ethernet-phy-ieee802.3-c22"。
+UART9：IRQ_TYPE_LEVEL_HIGH，IRQ 65；I2C2：IRQ 62；SARADC：IRQ 59。
+层次结构：扁平式，所有外设通过interrupt-parent = <&gic>引用根控制器，无中间层级。
+3. 以太网控制器（GMAC1）
+寄存器地址：0xFFF30000-0xFFF37FFF，compatible = "rockchip,rk3568-gmac"，中断IRQ 89/90。
+PHY 配置：双 RTL8211F，phy-mode = "rgmii-id"（带内部延迟），phy-handle = <&phy0>/<&phy1>，PHY 地址0x00（网口 1）、0x01（网口 2），支持 10/100/1000Mbps 自适应。
+4. USB 控制器
+USB3.0 OTG：compatible = "rockchip,rk3568-xhci"，5Gbps 速率，支持 OTG 模式切换。
+USB2.0 HOST：compatible = "rockchip,rk3568-ehci"，480Mbps 速率，供 USB2.0 外设。
+5. HDMI2.0 TX 控制器
+寄存器地址：0xFF940000-0xFF947FFF，compatible = "rockchip,rk3568-hdmi"，中断IRQ 85，支持 4K@60Hz（像素时钟 594MHz，PLL_HDMI提供），内嵌音频（12MHz PLL_AUDIO）。
+6. MIPI 控制器
+MIPI_DSI_TX0/LVDS_TX0：0xFF960000-0xFF96FFFF，compatible = "rockchip,rk3568-mipi-dsi"，中断IRQ 86。
+MIPI_CSI_RX：0xFF980000-0xFF98FFFF，compatible = "rockchip,rk3568-mipi-csi"，中断IRQ 87，预留图像采集。
+7. SDMMC 控制器（TF 卡）
+寄存器地址：0xFFC00000-0xFFC07FFF，compatible = "rockchip,rk3568-sdmmc"，中断IRQ 58，支持 SDHC/SDXC，UHS-I 速率。
+8. SARADC 控制器（温度检测）
+寄存器地址：0xFF790000-0xFF79FFFF，compatible = "rockchip,rk3568-saradc"，中断IRQ 59，通道 3（SARADC_VIN3）检测 CPU 温度，参考电压 3.3V（VCC3V3_PI6C），12 位精度，1KHz 采样频率。
+五、时钟控制器配置
+1. 各 PLL 兼容性与功能
+PLL_CPU：compatible = "rockchip,rk3568-pll-cpu"，输出 1.8GHz，不分频（divider-cpu = <1>），供给 CPU 核心。
+PLL_DDR：compatible = "rockchip,rk3568-pll-ddr"，输出 2133MHz，不分频（divider-ddr = <1>），供给 LPDDR4X。
+PLL_ETH：compatible = "rockchip,rk3568-pll-eth"，输出 125MHz（divider-eth-core = <1>，供给 GMAC1）、25MHz（divider-eth-ref = <5>，供给 PHY）。
+PLL_HDMI：compatible = "rockchip,rk3568-pll-hdmi"，输出最高 594MHz（像素时钟）。
+PLL_PCIE：compatible = "rockchip,rk3568-pll-pcie"，输出 100MHz 参考时钟，供给 PCIe 设备。
+PLL_PERIPH：compatible = "rockchip,rk3568-pll-periph"，输出 24MHz（UART/PWM）、48MHz（UART）、100MHz（SPI）。
+2. 分频器配置
+UART 分频：divider-uart = <1>（48MHz 供给 UART，115200bps 时分频 416）。
+SPI 分频：divider-spi = <5>（100MHz÷5=20MHz，匹配 GC9307 最大 SPI 时钟规格）。
+PWM 分频：divider-pwm = <1>（24MHz 供给 PWM，PWM14 分频 960→25KHz）。
+3. 固定频率时钟
+ETH_REF_CLK：fixed-clock@1 { compatible = "fixed-clock"; clock-frequency = <25000000>; clock-output-names = "eth_ref_clk"; };（25MHz，冗余确保 PHY 稳定）。
+HDMI_AUDIO_CLK：fixed-clock@2 { compatible = "fixed-clock"; clock-frequency = <12000000>; clock-output-names = "hdmi_audio_clk"; };（12MHz，HDMI 音频）。
+SPI_LCD_CLK：fixed-clock@3 { compatible = "fixed-clock"; clock-frequency = <20000000>; clock-output-names = "spi_lcd_clk"; };（20MHz，与 SPI 分频后频率一致，确保 GC9307 兼容）。
+六、引脚控制组定义（pinctrl）
+1. 驱动能力配置宏定义（根节点补充）
+plaintext
+pcfg_pull_up_drv3: pcfg-pull-up-drv3 {
+    rockchip,pinmux = <RK_FUNC_1>;
+    rockchip,pinconf = <PIN_CONFIG_PULL_UP>, <PIN_CONFIG_DRIVE_STRENGTH_3>; /* 驱动强度3档 */
+};
+pcfg_pull_none_drv3: pcfg-pull-none-drv3 {
+    rockchip,pinmux = <RK_FUNC_1>;
+    rockchip,pinconf = <PIN_CONFIG_PULL_NONE>, <PIN_CONFIG_DRIVE_STRENGTH_3>; /* 驱动强度3档 */
+};
+2. UART 相关 pinctrl
+pinctrl-uart2：uart2_tx { rockchip,pins = <1 6 RK_FUNC_1 &pcfg_pull_none>; }; uart2_rx { rockchip,pins = <1 7 RK_FUNC_1 &pcfg_pull_none>; };。
+pinctrl-uart9：uart9_tx { rockchip,pins = <2 2 RK_FUNC_2 &pcfg_pull_none>; }; uart9_rx { rockchip,pins = <2 3 RK_FUNC_2 &pcfg_pull_none>; };。
+3. SPI 显示屏 pinctrl（修正驱动强度与时钟适配）
+pinctrl-spi-lcd：spi_cs { rockchip,pins = <3 0 RK_FUNC_0 &pcfg_pull_up>; }; spi_clk { rockchip,pins = <3 1 RK_FUNC_1 &pcfg_pull_none_drv3>; }; spi_mosi { rockchip,pins = <3 2 RK_FUNC_1 &pcfg_pull_none_drv3>; };。
+4. 按键 pinctrl
+pinctrl-keys：reset_key { rockchip,pins = <0 0 RK_FUNC_0 &pcfg_pull_up>; }; flash_key { rockchip,pins = <4 2 RK_FUNC_0 &pcfg_pull_up>; }; power_key { rockchip,pins = <0 1 RK_FUNC_0 &pcfg_pull_up>; };。
+5. LCD 相关 pinctrl
+pinctrl-lcd：lcd_clk { rockchip,pins = <6 0 RK_FUNC_3 &pcfg_pull_up>; }; lcd_hsync { rockchip,pins = <6 1 RK_FUNC_3 &pcfg_pull_up>; }; lcd_vsync { rockchip,pins = <6 2 RK_FUNC_3 &pcfg_pull_up>; }; lcd_de { rockchip,pins = <6 3 RK_FUNC_3 &pcfg_pull_up>; };。
+6. 上下拉配置原则
+&pcfg_pull_up：按键、片选引脚（防止浮空）。
+&pcfg_pull_none：UART/SPI 数据引脚、时钟引脚（避免影响高速传输）。
+&pcfg_pull_down：预留，当前无外设使用。
+七、电压调节器配置（RK817+5G 专用 DC-DC 最终版）
+1. 核心原则说明
+RK817 无 3.7V/3.8V 直接输出通道，5G 模块（如 FM350gl/RM500Q）的 3.8V 典型供电需求，通过 “RK817 前级供电 + 外部 DC-DC 降压” 实现，命名完全贴合实际负载需求，无歧义。
+2. RK817 原始输出通道（符合芯片规格）
+VCC0V9_DDR：0.9V（DDR 内存辅助电源，BUCK1 通道，固定输出），regulator-name = "vcc0v9_ddr";，关联RK3568_PD_DDR电源域。
+VCC1V2_CPU：1.2V（CPU 核心辅助电源，BUCK2 通道，固定输出），regulator-name = "vcc1v2_cpu";，关联RK3568_PD_CPU。
+VCC1V8_PERI：1.8V（SOC 内核外设、PCIe PHY 电源，LDO1 通道，固定输出），regulator-name = "vcc1v8_peri";，关联RK3568_PD_PERI，VCCA_1V8_EN使能。
+VCC3V3_PERI：3.3V（I2C 外设、SPI 显示屏、以太网 PHY、ADC 参考电源，LDO2 通道，固定输出），regulator-name = "vcc3v3_peri";，关联RK3568_PD_PERI。
+VCC4V2_PRE：4.2V（前级供电，BUCK3 通道，软件可调范围 3.3V~4.2V，默认 4.2V），regulator-name = "vcc4v2_pre";，关联RK3568_PD_PERI，专为外部 DC-DC 提供输入。
+VCC5V_USB：5.0V（USB 接口、风扇、MINIPCIE PA 供电，外部扩展 BUCK，由 RK817 EN 信号控制使能），regulator-name = "vcc5v_usb";，关联RK3568_PD_USB。
+3. 5G 模块专用 DC-DC 配置（贴合 3.8V 需求）
+外部 DC-DC（TPS62172）专为 5G 模块提供 3.8V 供电，命名直接关联负载，无多余电压标识：
+plaintext
+vcc3v8_5g: regulator@4 {
+    compatible = "ti,tps62172-regulator";
+    regulator-name = "vcc3v8_5g"; /* 明确为5G模块专用3.8V供电，贴合实际需求 */
+    input-supply = <&vcc4v2_pre>; /* 输入为RK817的4.2V前级供电 */
+    regulator-min-microvolt = <3750000>; /* 适配5G模块电压容忍范围（3.75V~3.85V） */
+    regulator-max-microvolt = <3850000>;
+    regulator-output-voltage = <3800000>; /* 固定3.8V，匹配5G模块典型需求 */
+    enable-gpios = <&gpio4 0 GPIO_ACTIVE_HIGH>; /* 使能GPIO关联5G模块电源序列 */
+    regulator-always-on = <0>; /* 随5G模块启停控制，不常通 */
+};
+4. 电源域关联（无连锁冲突）
+RK817 BUCK3（VCC4V2_PRE）：power-domains = <&power RK3568_PD_PERI>;（前级供电关联外设电源域）。
+5G 专用 DC-DC（VCC3V8_5G）：无直接电源域关联，通过使能 GPIO 与 5G 模块电源序列联动，确保供电时序匹配。
+5. 电源序列时序（精准适配 5G 模块）
+（1）RK817 上电序列（系统级）
+启动 VCC0V9_DDR（0.9V，DDR 辅助）→ 延迟 20ms。
+启动 VCC1V2_CPU（1.2V，CPU 核心）→ 延迟 20ms。
+启动 VCC1V8_PERI（1.8V，外设核心）→ 延迟 20ms。
+启动 VCC3V3_PERI（3.3V，外设）→ 延迟 20ms。
+启动 VCC4V2_PRE（4.2V，前级供电）→ 延迟 20ms。
+启动 VCC5V_USB（5V，USB / 风扇）→ 延迟 20ms。
+（2）5G 模块上电序列（贴合 3.8V 供电逻辑）
+拉高 GPIO4_A0（VDD_MAIN_EN）→ 使能 RK817 VCC4V2_PRE 输出 4.2V → 延迟 50ms（前级电源稳定）。
+外部 DC-DC（TPS62172）自动稳压至 3.8V（VCC3V8_5G）→ 延迟 10ms（降压后电压稳定）。
+拉高 GPIO4_A1（VDD_IO_EN，3.3V IO 电源，取自 VCC3V3_PERI）→ 延迟 30ms。
+拉高 GPIO4_A2（VDD_RF_EN，3.8V RF 电源，取自 VCC3V8_5G）→ 延迟 20ms。
+拉低 GPIO4_A3（5G_RST#）→ 保持 100ms 后拉高，完成模块复位初始化。
+（3）5G 模块断电序列（反向执行）
+拉低 GPIO4_A2（VDD_RF_EN）→ 延迟 20ms。
+拉低 GPIO4_A1（VDD_IO_EN）→ 延迟 30ms。
+拉低 GPIO4_A0（VDD_MAIN_EN）→ 关闭 VCC4V2_PRE 与 VCC3V8_5G → 延迟 50ms。
+按系统级断电序列关闭其他电源通道。
+八、设备树节点层次结构
+1. 总线节点组织（根→soc→总线→设备）
+根节点：/ { compatible = "rockchip,xiaguapi-v3", "rockchip,rk3568"; #address-cells = <2>; #size-cells = <2>; };。
+soc 节点：/soc { compatible = "simple-bus"; ranges; #address-cells = <1>; #size-cells = <1>;，包含所有 SOC 内置外设（CPU、时钟、中断、GPIO 等）。
+I2C 节点：/soc/i2c@ff720000 { /* I2C0，挂载RK817 */ };、/soc/i2c@ff730000 { /* I2C2，挂载GC9307 */ };。
+SPI 节点：/soc/spi@ff750000 { /* SPI主机，挂载GC9307 */ };。
+PCIe 节点：/soc/pcie@ff000000 { /* PCIe控制器，关联M.2/E Key */ };。
+以太网节点：/soc/ethernet@fff30000 { /* GMAC1，关联双PHY */ };。
+5G 专用 DC-DC 节点：直接挂载于根节点，明确关联 RK817 前级电源，命名为vcc3v8_5g。
+2. 节点间引用关系
+时钟引用：clocks = <&clk RK3568_CLK_ETH_REF>, <&clk RK3568_CLK_GMAC>; clock-names = "ref_clk", "gmac_clk";（以太网引用 ETH 时钟）。
+中断引用：interrupt-parent = <&gic>; interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;（以太网引用 GIC）。
+pinctrl 引用：pinctrl-names = "default"; pinctrl-0 = <&pinctrl-uart9>;（UART9 引用 pinctrl-uart9）。
+显示屏时序引用：display-timings = <&lcd_timing>;（LCD 节点引用时序节点）。
+PHY 引用：phy-handle = <&phy0>;（GMAC1 引用 phy0 节点）。
+电源引用：power-supply = <&vcc3v3_peri>;（SPI 显示屏引用 3.3V 电源）、input-supply = <&vcc4v2_pre>;（5G DC-DC 引用 RK817 前级电源）。
+3. 状态属性（status）
+启用（okay）：eMMC、HDMI2.0、双以太网、USB3.0 OTG、SPI 显示屏、5G 接口、WiFi 接口、UART2/UART9、SARADC、RK817 所有电源通道、5G 专用 DC-DC 转换器。
+禁用（disabled）：备用 SPI Flash、备用 UART、备用 I2C 设备、MIPI_CSI（未焊接）。
+九、特定外设绑定要求（最终修正版）
+1. 显示屏（GC9307，320x240@60Hz，SPI 时钟修正）
+（1）timing 节点
+plaintext
+lcd_timing: display-timings {
+    native-mode = <&timing0>;
+    timing0: timing0 {
+        clock-frequency = <5840000>; /* 5.84MHz像素时钟 */
+        hactive = <320>; /* 水平有效像素 */
+        hfront-porch = <20>; /* 水平前肩 */
+        hsync-len = <10>; /* 水平同步脉冲 */
+        hback-porch = <15>; /* 水平后肩 */
+        vactive = <240>; /* 垂直有效像素 */
+        vfront-porch = <10>; /* 垂直前肩 */
+        vsync-len = <2>; /* 垂直同步脉冲 */
+        vback-porch = <8>; /* 垂直后肩 */
+        hsync-active = <0>; /* HSYNC低有效 */
+        vsync-active = <0>; /* VSYNC低有效 */
+        de-active = <1>; /* DE高有效 */
+        pixelclk-active = <0>; /* 像素时钟下降沿采样 */
+    };
+};
+（2）SPI LCD 节点（时钟与时序修正）
+plaintext
+spi@ff750000 {
+    status = "okay";
+    compatible = "rockchip,rk3568-spi";
+    reg = <0xff750000 0x1000>;
+    clocks = <&clk RK3568_CLK_SPI>, <&clk RK3568_CLK_SPI_PCLK>;
+    clock-names = "spi", "pclk";
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    gc9307: lcd@0 {
+        compatible = "ilitek,gc9307", "rockchip,rk356x-spi-lcd";
+        reg = <0>;
+        spi-max-frequency = <20000000>; /* 严格匹配GC9307 20MHz最大时钟 */
+        spi-cpol = <0>; /* 时钟极性：空闲低电平 */
+        spi-cpha = <0>; /* 时钟相位：上升沿采样 */
+        spi-tx-bus-width = <1>; /* 1线MOSI传输 */
+        spi-rx-bus-width = <1>;
+        spi-delay-us = <1>; /* 字节间延迟1us，增强传输稳定性 */
+        pinctrl-names = "default";
+        pinctrl-0 = <&pinctrl-spi-lcd>;
+        display-timings = <&lcd_timing>;
+        power-supply = <&vcc3v3_peri>; /* 关联3.3V外设电源 */
+        reset-gpios = <&gpio3 3 GPIO_ACTIVE_LOW>; /* 预留复位GPIO */
+        backlight-gpios = <&gpio3 4 GPIO_ACTIVE_HIGH>; /* 背光控制GPIO */
+    };
+};
+2. 以太网（GMAC1+RTL8211F）
+plaintext
+ethernet@fff30000 {
+    status = "okay";
+    compatible = "rockchip,rk3568-gmac";
+    reg = <0xfff30000 0x8000>;
+    interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;
+    clocks = <&clk RK3568_CLK_ETH_REF>, <&clk RK3568_CLK_GMAC>;
+    clock-names = "ref_clk", "gmac_clk";
+    power-domains = <&power RK3568_PD_ETH>;
+    phy-mode = "rgmii-id"; /* RGMII带内部延迟，无需外部电阻 */
+    phy-handle = <&phy0>;
+    mdio {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        phy0: ethernet-phy@0 {
+            reg = <0x00>;
+            compatible = "realtek,rtl8211f";
+            interrupts-extended = <&gic 89 IRQ_TYPE_LEVEL_HIGH>;
+        };
+        phy1: ethernet-phy@1 {
+            reg = <0x01>;
+            compatible = "realtek,rtl8211f";
+            interrupts-extended = <&gic 90 IRQ_TYPE_LEVEL_HIGH>;
+        };
+    };
+};
+3. PCIe（M.2 E/B Key）
+plaintext
+pcie@ff000000 {
+    status = "okay";
+    compatible = "rockchip,rk3568-pcie";
+    reg = <0xff000000 0x100000>;
+    interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;
+    clocks = <&clk RK3568_CLK_PCIE_REF>, <&clk RK3568_CLK_PCIE>;
+    clock-names = "ref_clk", "pcie_clk";
+    power-domains = <&power RK3568_PD_PCIE>;
+    phy-mode = "pcie-gen3"; /* PCIe3.0协议，5.0GT/s传输速率 */
+    pcie-phy = <&pcie_phy>;
+    msi-parent = <&gic>; /* MSI中断关联GIC控制器 */
+
+    pcie_phy: pcie-phy {
+        compatible = "rockchip,rk3568-pcie-phy";
+        reg = <0xff010000 0x1000>;
+        clocks = <&clk RK3568_CLK_PCIE_PHY>;
+        clock-names = "phy_clk";
+        power-domains = <&power RK3568_PD_PCIE_PHY>;
+        status = "okay";
+    };
+};
+4. 5G 模块专用电源节点（补充绑定）
+plaintext
+5g_module: 5g-module@0 {
+    compatible = "quectel,rm500q", "fibocom,fm350gl"; /* 适配主流5G模块 */
+    power-supply = <&vcc3v8_5g>; /* 明确关联5G专用3.8V电源 */
+    vdd-io-supply = <&vcc3v3_peri>; /* IO电源取自3.3V外设电源 */
+    reset-gpios = <&gpio4 3 GPIO_ACTIVE_LOW>; /* 复位GPIO */
+    enable-gpios = <&gpio4 0 GPIO_ACTIVE_HIGH>; /* 电源使能GPIO */
+    uart = <&uart9>; /* 关联UART9数据串口 */
+    status = "okay";
+};
+十、系统保留内存区域
+基于 RK3568 内存范围0x80000000-0xBFFFFFFF（1GB），预留如下区域：
+1. 多媒体保留内存（VPU/GPU）
+plaintext
+reserved-memory {
+    #address-cells = <2>;
+    #size-cells = <2>;
+    ranges;
+
+    vpu_reserved: vpu@88000000 {
+        reg = <0x0 0x88000000 0x0 0x04000000>; /* 64MB，用于VPU视频解码、GPU图形渲染 */
+        no-map; /* 禁止Linux内核常规映射 */
+    };
+};
+2. DMA 缓冲区区域（外设 DMA）
+plaintext
+dma_reserved: dma@8C000000 {
+    reg = <0x0 0x8C000000 0x0 0x02000000>; /* 32MB，供以太网、USB、SPI等外设DMA传输 */
+    compatible = "shared-dma-pool";
+    reusable; /* 支持多外设复用 */
+    no-map;
+};
+3. 安全监控区域（TEE）
+plaintext
+secure_reserved: secure@8E000000 {
+    reg = <0x0 0x8E000000 0x0 0x00100000>; /* 1MB，用于可信执行环境（TEE）、安全监控 */
+    compatible = "rockchip,secure-memory";
+    no-map;
+};

@@ -58,7 +58,6 @@ cd "${OPENWRT_ROOT}"
 # 清理可能的旧配置片段
 sed -i '/define U-Boot\/xiguapi-v3-rk3568/,/endef/ d' "${UBOOT_MAKEFILE_CHECK_PATH}" 2>/dev/null || true
 sed -i '/xiguapi-v3-rk3568 \\/d' "${UBOOT_MAKEFILE_CHECK_PATH}" 2>/dev/null || true
-sed -i '/TARGET_DEVICES += nlnet_xiguapi-v3/d' "${ARMV8_CUSTOM_CHECK_PATH}" 2>/dev/null || true
 echo -e "✅ 已清理源码中残留的侵入式配置"
 
 # 5. 检查自定义配置目录和核心文件
@@ -94,7 +93,6 @@ cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-
 
 echo -e "✅ 自定义配置部署完成"
 echo -e "  📍 主设备树：${DTS_CHECK_PATH}"
-echo -e "  📍 设备定义文件：${ARMV8_CUSTOM_CHECK_PATH}"
 echo -e "  📍 UBoot Makefile：${UBOOT_MAKEFILE_CHECK_PATH}"
 
 # 7. 验证自定义配置部署结果

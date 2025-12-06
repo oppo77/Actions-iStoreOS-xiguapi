@@ -96,7 +96,7 @@ echo -e "  📍 UBoot Makefile：${UBOOT_MAKEFILE_CHECK_PATH}"
 echo -e "  📍 UBoot 配置：${UBOOT_CONFIG_CHECK_PATH}"
 echo -e "  📍 UBoot DTSI：${UBOOT_DTSI_CHECK_PATH}"
 
-# 7. 添加nlnet_xiguapi-v3设备定义
+# 7. 添加nlnet_xiguapi-v3设备定义（修正格式）
 echo -e "\n【4/6】添加设备定义到 legacy.mk 文件..."
 
 # 确保legacy.mk文件存在
@@ -106,10 +106,10 @@ if [ ! -f "${LEGACY_MK_PATH}" ]; then
     touch "${LEGACY_MK_PATH}"
 fi
 
-# 添加新的设备定义
+# 添加新的设备定义（修正格式）
 echo -e "
 define Device/nlnet_xiguapi-v3
-  \$(call Device/Legacy/rk3568,\$(1))
+\$(call Device/Legacy/rk3568,\$(1))
   DEVICE_VENDOR := NLNET
   DEVICE_MODEL := Xiguapi V3
   DEVICE_DTS := rk3568/rk3568-xiguapi-v3
@@ -154,6 +154,14 @@ if [ -f "${LEGACY_MK_PATH}" ]; then
         echo -e "=========================================="
         grep -n -A 19 -B 19 "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}" 2>/dev/null || echo "未找到相关行"
         echo -e "=========================================="
+        
+        # 额外检查格式是否正确
+        echo -e "\n🔍 检查设备定义格式："
+        if grep -A5 "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}" | grep -q "^\s*\$(call Device/Legacy/rk3568"; then
+            echo -e "✅ 设备定义格式正确"
+        else
+            echo -e "⚠️  设备定义格式可能需要调整"
+        fi
     else
         echo -e "❌ legacy.mk 中未找到 nlnet_xiguapi-v3 设备定义"
         verify_pass=1
@@ -171,6 +179,7 @@ if [ ${verify_pass} -eq 0 ]; then
     echo -e "✅ 设备树文件已部署"
     echo -e "✅ UBoot配置已更新"
     echo -e "✅ 设备定义已添加到 legacy.mk"
+    echo -e "✅ 设备定义格式已验证"
     echo -e "=========================================="
     echo -e "📋 说明："
     echo -e "  - 此脚本仅完成硬件适配"

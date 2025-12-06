@@ -49,7 +49,6 @@ jobs:
         echo "WORKDIR=${GITHUB_WORKSPACE}/workdir" >> $GITHUB_ENV
         echo "CCACHE_DIR=${GITHUB_WORKSPACE}/ccache" >> $GITHUB_ENV
         echo "OPENWRT_ROOT=${GITHUB_WORKSPACE}/workdir/openwrt" >> $GITHUB_ENV
-        echo "当前工作目录: $(pwd)"
 
     - name: 缓存CCACHE
       uses: actions/cache@v4
@@ -59,15 +58,17 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-ccache-${{ env.ARCHITECTURE }}-
 
-    - name: 初始化编译环境
+    - name: 初始化编译环境 (GCC版本)
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        echo "------------------------------- 仅更新源 -------------------------------"
+        echo "更新软件包列表..."
         sudo apt update -y
-        echo "------------------------------- 安装编译核心依赖 -------------------------------"
+        
+        echo "安装编译核心依赖（GCC工具链）..."
+        # 注意：已完全移除 clang, lld, llvm 等包
         sudo apt install -y \
-          build-essential clang lld libllvm-dev llvm-bpf llvm \
+          build-essential \
           flex bison g++ gawk gcc-multilib g++-multilib \
           autoconf automake binutils libtool patch pkgconf quilt \
           gettext libncursesw5-dev libncurses-dev libreadline-dev \
@@ -80,14 +81,19 @@ jobs:
           git xsltproc libxml-parser-perl ant wget cmake ninja-build patchelf swig \
           openjdk-11-jre-headless
         
-        echo "------------------------------- 配置CCACHE -------------------------------"
+        echo "安装Python工具..."
+        sudo pip3 install pyelftools setuptools pyyaml --no-cache-dir
+        
+        echo "配置CCACHE..."
         ccache --set-config=max_size=10G
         ccache --set-config=compression=true
         ccache --set-config=compression_level=6
         ccache -s
         
-        echo "------------------------------- 设置时区 -------------------------------"
+        echo "设置时区..."
         sudo timedatectl set-timezone "$TZ"
+        
+        echo "✅ GCC编译环境初始化完成"
 
     - name: 克隆源码
       working-directory: ${{ env.WORKDIR }}

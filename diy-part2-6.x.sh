@@ -29,9 +29,23 @@ chmod 755 package/base-files/files/bin/coremark-arm64
 chmod 755 package/base-files/files/bin/coremark.sh
 
 
+# 复制dts设备树文件到指定目录下（由xiguapi-v3-adapt.sh处理）
+# cp -f $GITHUB_WORKSPACE/configfiles/dts/rk3588-orangepi-5-plus.dts target/linux/rockchip/dts/rk3588/rk3588-orangepi-5-plus.dts
+
+
 # iStoreOS-settings
 git clone --depth=1 -b main https://github.com/xiaomeng9597/istoreos-settings package/default-settings
 
 
 # 定时限速插件
 git clone --depth=1 https://github.com/sirpdboy/luci-app-eqosplus package/luci-app-eqosplus
+
+# 适配Xiguapi V3设备
+if [ -f "$GITHUB_WORKSPACE/xiguapi/xiguapi-v3-adapt.sh" ]; then
+    echo "正在适配Xiguapi V3设备..."
+    chmod +x "$GITHUB_WORKSPACE/xiguapi/xiguapi-v3-adapt.sh"
+    # 在OpenWrt源码目录中运行适配脚本
+    "$GITHUB_WORKSPACE/xiguapi/xiguapi-v3-adapt.sh"
+else
+    echo "警告: 未找到Xiguapi V3适配脚本"
+fi

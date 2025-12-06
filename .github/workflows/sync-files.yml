@@ -41,6 +41,9 @@ jobs:
            # 5. 关闭调试信息配置，减少固件体积
            sed -i 's/^CONFIG_REPRODUCIBLE_DEBUG_INFO=y$/# CONFIG_REPRODUCIBLE_DEBUG_INFO is not set/' ./armv8/.config
            sed -i 's/^CONFIG_KERNEL_DEBUG_INFO_BTF=y$/# CONFIG_KERNEL_DEBUG_INFO_BTF is not set/' ./armv8/.config
+           # 6. 排除缺失依赖的 LingTiGameAcc 相关包，防止编译失败
+           sed -i '/CONFIG_PACKAGE_luci-app-LingTiGameAcc/d' ./armv8/.config
+           sed -i '/CONFIG_PACKAGE_LingTiGameAcc/d' ./armv8/.config
            # =======================================
 
            # ========== 新增：强制关闭 LLVM 编译链 ==========

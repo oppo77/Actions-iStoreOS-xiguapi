@@ -44,9 +44,19 @@ jobs:
     - name: 创建工作目录
       run: |
         mkdir -p ${GITHUB_WORKSPACE}/workdir
-        chmod 755 ${GITHUB_WORKSPACE}/workdir
+        mkdir -p ${GITHUB_WORKSPACE}/ccache  # 新增：创建ccache缓存目录
+        chmod 755 ${GITHUB_WORKSPACE}/workdir ${GITHUB_WORKSPACE}/ccache
         echo "WORKDIR=${GITHUB_WORKSPACE}/workdir" >> $GITHUB_ENV
+        echo "CCACHE_DIR=${GITHUB_WORKSPACE}/ccache" >> $GITHUB_ENV  # 新增：配置ccache路径
         echo "当前工作目录: $(pwd)"
+
+    - name: 缓存CCACHE（核心优化：加速重复编译）
+      uses: actions/cache@v4  # 新增：启用ccache缓存
+      with:
+        path: ${{ env.CCACHE_DIR }}
+        key: ${{ runner.os }}-ccache-${{ env.ARCHITECTURE }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-ccache-${{ env.ARCHITECTURE }}-
 
     - name: 检查服务器配置
       run: |
@@ -61,16 +71,17 @@ jobs:
         echo -e "------------------------------- 磁盘信息（清理前） -------------------------------\n"
         df -Th
 
-    - name: 初始化编译环境（核心优化：先清理再装依赖）
+    - name: 初始化编译环境（核心优化：补充LLVM/Clang完整依赖）
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         echo "------------------------------- 仅更新源（跳过upgrade，避免占用空间） -------------------------------"
         sudo apt update -y
 
-        echo "------------------------------- 安装编译核心依赖（最小化） -------------------------------"
+        echo "------------------------------- 安装编译核心依赖（补充LLVM/Clang完整套件） -------------------------------"
         sudo apt install -y \
-          build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+          build-essential clang lld libllvm-dev llvm-bpf llvm \  # 新增：lld libllvm-dev llvm-bpf llvm
+          flex bison g++ gawk gcc-multilib g++-multilib \
           autoconf automake binutils libtool patch pkgconf quilt \
           gettext libncursesw5-dev libncurses-dev libreadline-dev \
           libssl-dev libelf-dev libglib2.0-dev device-tree-compiler \
@@ -82,8 +93,18 @@ jobs:
           git xsltproc libxml-parser-perl ant wget cmake ninja-build patchelf swig \
           openjdk-11-jre-headless
         
+        echo "------------------------------- 验证LLVM/Clang安装 -------------------------------"  # 新增：验证依赖安装
+        clang --version
+        llvm-config --version
+        lld --version
         echo "------------------------------- Python工具安装 -------------------------------"
         sudo pip3 install pyelftools setuptools pyyaml --no-cache-dir
+        
+        echo "------------------------------- 配置CCACHE（启用压缩+增大缓存） -------------------------------"  # 新增：优化ccache配置
+        ccache --set-config=max_size=10G
+        ccache --set-config=compression=true
+        ccache --set-config=compression_level=6
+        ccache -s  # 查看ccache初始状态
         
         echo "------------------------------- 最终磁盘检查 -------------------------------"
         df -Th
@@ -163,7 +184,7 @@ jobs:
         rm -rf package/custom/baidupcs-web
         echo "✅ 两遍feeds安装完成，已清理baidupcs相关残留依赖"
 
-    - name: 加载自定义配置 + 最终清理
+    - name: 加载自定义配置 + 验证CCACHE/LLVM配置
       env:
         CONFIG_FILE_PATH: ${{ github.workspace }}/${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
       working-directory: ${{ env.WORKDIR }}/openwrt
@@ -191,6 +212,21 @@ jobs:
         sed -i '/CONFIG_PACKAGE_luci-app-baidupcs-web/d' .config
         sed -i '/CONFIG_PACKAGE_baidupcs-web/d' .config
         echo "✅ 彻底移除baidupcs相关配置"
+        
+        # 新增：验证CCACHE和LLVM配置是否启用
+        echo "===== 验证CCACHE/LLVM配置 ====="
+        if ! grep -q "CONFIG_CCACHE=y" .config; then
+          echo "❌ 错误：.config 中未启用 CCACHE，自动添加"
+          echo "CONFIG_CCACHE=y" >> .config
+        else
+          echo "✅ CCACHE 已启用"
+        fi
+        
+        if ! grep -q "CONFIG_USE_LLVM_BUILD=y" .config; then
+          echo "⚠️ 提示：.config 中未启用 LLVM 编译链，若需要请手动开启"
+        else
+          echo "✅ LLVM 编译链已启用"
+        fi
         
         # 验证编译目标配置
         echo "===== 验证编译目标配置 ====="
@@ -230,14 +266,20 @@ jobs:
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
-    - name: 编译固件（优化：失败时单线程调试）
+    - name: 编译固件（优化：启用CCACHE+LLVM，失败时单线程调试）
       id: compile
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
         echo "当前工作目录: $(pwd)"
-        echo -e "$(nproc) thread compile"
-        # 首次多线程编译，失败则单线程带日志调试
+        echo "CCACHE 状态（编译前）:"
+        ccache -s  # 新增：查看ccache状态
+        echo -e "$(nproc) thread compile (CCACHE+LLVM)"
+        # 启用CCACHE和LLVM编译链，首次多线程编译，失败则单线程带日志调试
+        export CCACHE_DIR=${{ env.CCACHE_DIR }}
+        export USE_CCACHE=1
         make -j$(nproc) || make -j1 V=s
+        # 查看CCACHE使用情况
+        ccache -s  # 新增：查看ccache编译后状态
         # 检查编译结果
         if [ -d "bin/targets" ]; then
           echo "✅ 编译成功，开始整理固件"
@@ -328,6 +370,7 @@ jobs:
         - 登录账号：root
         - 登录密码：password
         - 网络模式：主路由模式（eth0=LAN，eth1=WAN）
+        - 编译优化：启用 CCACHE 缓存 + LLVM/Clang 编译链
         
         ## 📋 编译说明
         1. 基于iStore OS 24.10.2稳定分支构建
@@ -335,6 +378,7 @@ jobs:
         3. 适配Xiguapi V3硬件，优化驱动兼容性
         4. 保留iStore OS原生功能，支持软件中心
         5. 执行两遍feeds update/install确保依赖拉取完整
+        6. 启用CCACHE加速编译，LLVM/Clang提升编译效率
         
         ## ⚠️ 刷机提示
         - 请使用TF卡或USB刷机，确保电源稳定

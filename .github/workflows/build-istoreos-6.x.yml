@@ -1,10 +1,10 @@
-name: Build iStore OS 6.x
+name: Build iStore OS 6.x (Xiguapi V3)
 
 on:
   repository_dispatch:
   workflow_dispatch:
   schedule:
-   - cron: 0 16 * * *
+    - cron: 0 16 * * *
 
 env:
   REPO_URL: https://github.com/istoreos/istoreos
@@ -23,6 +23,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write  # 确保发布Releases权限
 
     steps:
     - name: 最大化磁盘空间（核心优化）
@@ -94,12 +96,11 @@ jobs:
       run: |
         echo "当前工作目录: $(pwd)"
         df -hT $PWD
-        git clone ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} openwrt
+        git clone --depth 1 ${{ env.REPO_URL }} -b ${{ env.REPO_BRANCH }} openwrt
         echo "源码克隆完成，当前目录内容:"
         ls -la
         ln -sf ${{ env.WORKDIR }}/openwrt $GITHUB_WORKSPACE/openwrt || true
 
-    # 简化后的脚本执行步骤（核心修改）
     - name: 执行xiguapi-v3设备适配脚本
       run: |
         echo "工作目录: ${{ env.WORKDIR }}"
@@ -107,10 +108,8 @@ jobs:
         if [ -f "$SCRIPT_PATH" ]; then
           echo "找到适配脚本: $SCRIPT_PATH"
           chmod +x $SCRIPT_PATH
-          # 显式指定 OPENWRT_ROOT 为源码目录
           export OPENWRT_ROOT="${{ env.WORKDIR }}/openwrt"
           echo "OPENWRT_ROOT设置为: $OPENWRT_ROOT"
-          # 直接执行仓库中的脚本，无需复制
           $SCRIPT_PATH
           if [ $? -eq 0 ]; then
             echo "✅ xiguapi-v3适配脚本执行成功"
@@ -124,15 +123,22 @@ jobs:
           exit 1
         fi
 
-    - name: 加载自定义 feeds
+    - name: 加载自定义 feeds + 排除 luci-app-baidupcs-web
       env:
         FEEDS_CONF_PATH: ${{ env.ARCHITECTURE }}/${{ env.FEEDS_CONF }}
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
         echo "当前工作目录: $(pwd)"
+        # 加载自定义feeds.conf
         [ -e $FEEDS_CONF_PATH ] && mv $FEEDS_CONF_PATH ${{ env.FEEDS_CONF }}
+        # 执行diy-part1.sh（在此脚本中添加过滤逻辑）
         chmod +x ${{ github.workspace }}/${{ env.DIY_P1_SH }}
         ${{ github.workspace }}/${{ env.DIY_P1_SH }}
+        # 额外过滤：删除feeds中包含luci-app-baidupcs-web的行（防止遗漏）
+        sed -i '/luci-app-baidupcs-web/d' ${{ env.FEEDS_CONF }}
+        sed -i '/baidupcs-web/d' ${{ env.FEEDS_CONF }}
+        echo "✅ 已在feeds配置中排除luci-app-baidupcs-web相关包"
+        cat ${{ env.FEEDS_CONF }} | grep -vE "baidupcs|BAIDUPCS"  # 验证过滤结果
 
     - name: 更新 feeds（第1遍）
       working-directory: ${{ env.WORKDIR }}/openwrt
@@ -142,15 +148,22 @@ jobs:
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: ./scripts/feeds update -a
 
-    - name: 安装 feeds（第1遍）
+    - name: 安装 feeds（第1遍）- 排除 luci-app-baidupcs-web
       working-directory: ${{ env.WORKDIR }}/openwrt
-      run: ./scripts/feeds install -a
+      run: ./scripts/feeds install -a -x luci-app-baidupcs-web
 
-    - name: 安装 feeds（第2遍）
+    - name: 安装 feeds（第2遍）- 排除 luci-app-baidupcs-web + 清理残留依赖
       working-directory: ${{ env.WORKDIR }}/openwrt
-      run: ./scripts/feeds install -a
+      run: |
+        ./scripts/feeds install -a -x luci-app-baidupcs-web
+        # 清理可能残留的baidupcs-web相关目录
+        rm -rf package/feeds/*/luci-app-baidupcs-web
+        rm -rf package/feeds/*/baidupcs-web
+        rm -rf package/custom/luci-app-baidupcs-web
+        rm -rf package/custom/baidupcs-web
+        echo "✅ 两遍feeds安装完成，已清理baidupcs相关残留依赖"
 
-    - name: 加载自定义配置
+    - name: 加载自定义配置 + 最终清理
       env:
         CONFIG_FILE_PATH: ${{ github.workspace }}/${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
       working-directory: ${{ env.WORKDIR }}/openwrt
@@ -167,24 +180,28 @@ jobs:
           exit 1
         fi
         
+        # 执行diy-part2.sh
         chmod +x ${{ github.workspace }}/${{ env.DIY_P2_SH }}
         ${{ github.workspace }}/${{ env.DIY_P2_SH }}
         echo "✅ 执行 diy-part2.sh 完成"
         
+        # 最终清理：确保.config中无baidupcs相关配置
         sed -i '/luci-app-baidupcs-web/d' .config
-        echo "✅ 移除 luci-app-baidupcs-web 配置完成"
+        sed -i '/baidupcs-web/d' .config
+        sed -i '/CONFIG_PACKAGE_luci-app-baidupcs-web/d' .config
+        sed -i '/CONFIG_PACKAGE_baidupcs-web/d' .config
+        echo "✅ 彻底移除baidupcs相关配置"
         
+        # 验证编译目标配置
         echo "===== 验证编译目标配置 ====="
         if ! grep -q "CONFIG_TARGET_rockchip_armv8=y" .config; then
           echo "❌ 错误：.config 中未选中 rockchip/armv8 目标"
-          echo "当前 .config 中的目标配置:"
           grep -E "CONFIG_TARGET_(rockchip|ath79|ramips)" .config || true
           exit 1
         fi
         
         if ! grep -q "CONFIG_TARGET_rockchip_armv8_DEVICE_nlnet_xiguapi-v3=y" .config; then
           echo "❌ 错误：.config 中未选中 nlnet_xiguapi-v3 设备"
-          echo "当前已选中的 rockchip 设备:"
           grep -E "CONFIG_TARGET_rockchip_armv8_DEVICE_" .config || true
           exit 1
         fi
@@ -199,7 +216,6 @@ jobs:
         echo "===== 编译目标配置验证通过 ====="
 
     - name: 下载软件包（第1遍）
-      id: package1
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
         make defconfig
@@ -208,32 +224,30 @@ jobs:
         find dl -size -1024c -exec rm -f {} \;
 
     - name: 下载软件包（第2遍）
-      id: package2
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
-    - name: 编译固件
+    - name: 编译固件（优化：失败时单线程调试）
       id: compile
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
         echo "当前工作目录: $(pwd)"
         echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        
-        echo "编译完成，检查固件目录:"
-        find bin -type f -name "*.bin" -o -name "*.img" -o -name "*.gz" 2>/dev/null | head -20 || true
-        echo "bin目录结构:"
-        ls -la bin/ || true
+        # 首次多线程编译，失败则单线程带日志调试
+        make -j$(nproc) || make -j1 V=s
+        # 检查编译结果
         if [ -d "bin/targets" ]; then
-          echo "targets目录结构:"
-          find bin/targets -type d 2>/dev/null | head -20 || true
+          echo "✅ 编译成功，开始整理固件"
+          echo "status=success" >> ${GITHUB_OUTPUT}
+        else
+          echo "❌ 编译失败，无目标输出目录"
+          exit 1
         fi
-        
+        # 记录编译时间
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-        echo "status=success" >> ${GITHUB_OUTPUT}
 
     - name: 检查磁盘空间
       if: (!cancelled())
@@ -245,6 +259,7 @@ jobs:
       with:
         name: OpenWrt_bin${{ env.FILE_DATE }}
         path: ${{ env.WORKDIR }}/openwrt/bin
+        retention-days: 7  # 保留7天，节省空间
 
     - name: 整理固件文件
       id: organize
@@ -252,20 +267,15 @@ jobs:
       working-directory: ${{ env.WORKDIR }}/openwrt
       run: |
         echo "当前工作目录: $(pwd)"
-        
+        # 定位固件目录
         if [ -d "bin/targets/rockchip/armv8" ]; then
-          echo "找到固定路径: bin/targets/rockchip/armv8"
           FIRMWARE_DIR="bin/targets/rockchip/armv8"
         else
           TARGET_DIRS=($(find bin/targets -maxdepth 2 -mindepth 2 -type d ! -name "packages" 2>/dev/null))
           if [ ${#TARGET_DIRS[@]} -gt 0 ]; then
-            echo "找到通配符路径: ${TARGET_DIRS[0]}"
             FIRMWARE_DIR="${TARGET_DIRS[0]}"
           else
-            echo "错误：未找到固件输出目录"
-            echo "当前目录结构:"
-            ls -la
-            echo "bin目录结构:"
+            echo "❌ 未找到固件输出目录"
             find bin -type d 2>/dev/null | head -20
             exit 1
           fi
@@ -273,16 +283,20 @@ jobs:
         
         cd "$FIRMWARE_DIR"
         echo "已进入固件目录: $(pwd)"
-        echo "目录内容:"
         ls -la || true
         
-        if [ -d "packages" ]; then
-          rm -rf packages
-          echo "已删除packages目录"
+        # 删除冗余packages目录
+        [ -d "packages" ] && rm -rf packages && echo "✅ 已删除packages目录"
+        
+        # 统计固件文件数量
+        FIRMWARE_COUNT=$(ls *.bin *.img *.gz 2>/dev/null | wc -l)
+        if [ $FIRMWARE_COUNT -eq 0 ]; then
+          echo "❌ 固件目录中无有效固件文件"
+          exit 1
         fi
         
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "FIRMWARE_FILES=$(ls *.bin *.img *.gz 2>/dev/null | wc -l)" >> $GITHUB_ENV
+        echo "FIRMWARE_FILES=$FIRMWARE_COUNT" >> $GITHUB_ENV
         echo "status=success" >> ${GITHUB_OUTPUT}
 
     - name: 上传固件目录
@@ -291,23 +305,43 @@ jobs:
       with:
         name: OpenWrt_firmware${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
+        retention-days: 30  # 固件保留30天
 
-    - name: 生成发布标签
+    - name: 生成发布标签和说明
       id: tag
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H.%M")-${{ env.ARCHITECTURE }}-xiguapi-v3" >> ${GITHUB_OUTPUT}
-        touch release.txt
-        echo "
-        💻 架构: ${{ env.ARCHITECTURE }}
-        📇 设备: Xiguapi V3 (rk3568)
-        📂 源码: ${{ env.REPO_URL }}
-        🌳 分支: ${{ env.REPO_BRANCH }}
-        ⏱️ 编译时间: $(date +"%Y年%m月%d日%H时%M分")
-        🌐 管理地址: 192.168.100.1
-        👤 用户名: root
-        🔒 密码: password
-        📒 说明: Xiguapi V3 设备专属固件，默认网口 eth0=LAN, eth1=WAN，主路由模式。 " >> release.txt
+        # 生成带设备标识的标签
+        RELEASE_TAG="istoreos-24.10.2-${{ env.ARCHITECTURE }}-xiguapi-v3-$(date +"%Y%m%d-%H%M")"
+        echo "release_tag=$RELEASE_TAG" >> ${GITHUB_OUTPUT}
+        
+        # 生成发布说明
+        cat > release.txt << EOF
+        ## 📱 设备信息
+        - 架构：${{ env.ARCHITECTURE }} (rk3568)
+        - 设备：Xiguapi V3
+        - 源码：[${{ env.REPO_BRANCH }}](${{ env.REPO_URL }})
+        
+        ## ⚙️ 固件配置
+        - 编译时间：$(date +"%Y年%m月%d日%H时%M分")
+        - 管理地址：192.168.100.1
+        - 登录账号：root
+        - 登录密码：password
+        - 网络模式：主路由模式（eth0=LAN，eth1=WAN）
+        
+        ## 📋 编译说明
+        1. 基于iStore OS 24.10.2稳定分支构建
+        2. 已排除luci-app-baidupcs-web及依赖，解决编译报错
+        3. 适配Xiguapi V3硬件，优化驱动兼容性
+        4. 保留iStore OS原生功能，支持软件中心
+        5. 执行两遍feeds update/install确保依赖拉取完整
+        
+        ## ⚠️ 刷机提示
+        - 请使用TF卡或USB刷机，确保电源稳定
+        - 首次刷机建议恢复出厂设置，避免配置冲突
+        - 如有问题请在Issues中反馈
+        EOF
+        
         echo "status=success" >> ${GITHUB_OUTPUT}
 
     - name: 自动发布固件到 Releases
@@ -317,17 +351,21 @@ jobs:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
+        draft: false
+        prerelease: false
 
-    - name: 删除运行记录
+    - name: 清理旧工作流记录
       uses: xiaomeng9597/delete-workflow-runs@main
       with:
         retain_days: 20
         keep_minimum_runs: 15
         token: ${{ env.GITHUB_TOKEN }}
 
-    - name: 删除自动发布的旧固件
+    - name: 清理旧 Releases
       uses: dev-drprasad/delete-older-releases@v0.3.3
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 60
         delete_tags: true
+        repo: ${{ github.repository }}
+        token: ${{ env.GITHUB_TOKEN }}

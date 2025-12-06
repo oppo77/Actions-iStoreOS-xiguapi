@@ -27,7 +27,7 @@ jobs:
            # 追加自定义配置到.config末尾
            echo -e "\\n$configdata" >> ./armv8/.config
 
-           # ========== 新增：配置优化修改 ==========
+           # ========== 原有：配置优化修改 ==========
            # 1. 关闭 CONFIG_ALL_KMODS=y，改为禁用
            sed -i 's/^CONFIG_ALL_KMODS=y$/# CONFIG_ALL_KMODS is not set/' ./armv8/.config
            # 2. 修改根分区大小为 2048MB
@@ -42,6 +42,15 @@ jobs:
            sed -i 's/^CONFIG_REPRODUCIBLE_DEBUG_INFO=y$/# CONFIG_REPRODUCIBLE_DEBUG_INFO is not set/' ./armv8/.config
            sed -i 's/^CONFIG_KERNEL_DEBUG_INFO_BTF=y$/# CONFIG_KERNEL_DEBUG_INFO_BTF is not set/' ./armv8/.config
            # =======================================
+
+           # ========== 新增：强制关闭 LLVM 编译链 ==========
+           # 【核心】无论从哪个源来的 LLVM 配置，都强制关闭，确保使用 GCC
+           sed -i 's/^CONFIG_USE_LLVM_BUILD=y$/# CONFIG_USE_LLVM_BUILD is not set/' ./armv8/.config
+           # 同时关闭内核相关的 LLVM 选项，确保彻底
+           sed -i 's/^CONFIG_KERNEL_LLVM=y$/# CONFIG_KERNEL_LLVM is not set/' ./armv8/.config
+           sed -i 's/^CONFIG_KERNEL_CLANG=y$/# CONFIG_KERNEL_CLANG is not set/' ./armv8/.config
+           echo "✅ 已强制关闭所有 LLVM/Clang 相关编译选项。"
+           # ================================================
 
            # ========== 原有：删除旧设备配置 ==========
            sed -i '/^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE/d' ./armv8/.config
@@ -65,7 +74,7 @@ jobs:
         user_email: 'github-actions[bot]@github.com'
         exclude_assets: ''
         keep_files: true
-        commit_message: "Sync files: 优化配置（关闭全模块/扩容分区/调整libevent2/禁用wpad-basic-mbedtls/关闭调试）"
+        commit_message: "Sync files: 优化配置（关闭全模块/扩容分区/调整libevent2/禁用wpad-basic-mbedtls/关闭调试/强制使用GCC）"
 
     - name: 删除运行记录
       uses: xiaomeng9597/delete-workflow-runs@main

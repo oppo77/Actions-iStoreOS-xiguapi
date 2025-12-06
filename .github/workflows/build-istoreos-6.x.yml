@@ -24,10 +24,10 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     permissions:
-      contents: write  # 确保发布Releases权限
+      contents: write
 
     steps:
-    - name: 最大化磁盘空间（核心优化）
+    - name: 最大化磁盘空间
       uses: easimon/maximize-build-space@master
       with:
         swap-size-mb: 2048
@@ -41,17 +41,18 @@ jobs:
     - name: 准备完成
       uses: actions/checkout@main
 
-    - name: 创建工作目录
+    - name: 创建工作目录和缓存
       run: |
         mkdir -p ${GITHUB_WORKSPACE}/workdir
-        mkdir -p ${GITHUB_WORKSPACE}/ccache  # 新增：创建ccache缓存目录
+        mkdir -p ${GITHUB_WORKSPACE}/ccache
         chmod 755 ${GITHUB_WORKSPACE}/workdir ${GITHUB_WORKSPACE}/ccache
         echo "WORKDIR=${GITHUB_WORKSPACE}/workdir" >> $GITHUB_ENV
-        echo "CCACHE_DIR=${GITHUB_WORKSPACE}/ccache" >> $GITHUB_ENV  # 新增：配置ccache路径
+        echo "CCACHE_DIR=${GITHUB_WORKSPACE}/ccache" >> $GITHUB_ENV
+        echo "OPENWRT_ROOT=${GITHUB_WORKSPACE}/workdir/openwrt" >> $GITHUB_ENV
         echo "当前工作目录: $(pwd)"
 
-    - name: 缓存CCACHE（核心优化：加速重复编译）
-      uses: actions/cache@v4  # 新增：启用ccache缓存
+    - name: 缓存CCACHE
+      uses: actions/cache@v4
       with:
         path: ${{ env.CCACHE_DIR }}
         key: ${{ runner.os }}-ccache-${{ env.ARCHITECTURE }}-${{ github.sha }}
@@ -71,16 +72,16 @@ jobs:
         echo -e "------------------------------- 磁盘信息（清理前） -------------------------------\n"
         df -Th
 
-    - name: 初始化编译环境（核心优化：补充LLVM/Clang完整依赖）
+    - name: 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        echo "------------------------------- 仅更新源（跳过upgrade，避免占用空间） -------------------------------"
+        echo "------------------------------- 仅更新源 -------------------------------"
         sudo apt update -y
 
-        echo "------------------------------- 安装编译核心依赖（补充LLVM/Clang完整套件） -------------------------------"
+        echo "------------------------------- 安装编译核心依赖 -------------------------------"
         sudo apt install -y \
-          build-essential clang lld libllvm-dev llvm-bpf llvm \  # 新增：lld libllvm-dev llvm-bpf llvm
+          build-essential clang lld libllvm-dev llvm-bpf llvm \
           flex bison g++ gawk gcc-multilib g++-multilib \
           autoconf automake binutils libtool patch pkgconf quilt \
           gettext libncursesw5-dev libncurses-dev libreadline-dev \
@@ -93,18 +94,19 @@ jobs:
           git xsltproc libxml-parser-perl ant wget cmake ninja-build patchelf swig \
           openjdk-11-jre-headless
         
-        echo "------------------------------- 验证LLVM/Clang安装 -------------------------------"  # 新增：验证依赖安装
+        echo "------------------------------- 验证LLVM/Clang安装 -------------------------------"
         clang --version
         llvm-config --version
         lld --version
+        
         echo "------------------------------- Python工具安装 -------------------------------"
         sudo pip3 install pyelftools setuptools pyyaml --no-cache-dir
         
-        echo "------------------------------- 配置CCACHE（启用压缩+增大缓存） -------------------------------"  # 新增：优化ccache配置
+        echo "------------------------------- 配置CCACHE -------------------------------"
         ccache --set-config=max_size=10G
         ccache --set-config=compression=true
         ccache --set-config=compression_level=6
-        ccache -s  # 查看ccache初始状态
+        ccache -s
         
         echo "------------------------------- 最终磁盘检查 -------------------------------"
         df -Th
@@ -125,12 +127,16 @@ jobs:
     - name: 执行xiguapi-v3设备适配脚本
       run: |
         echo "工作目录: ${{ env.WORKDIR }}"
+        echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
+        echo "查找xiguapi目录..."
+        find ${GITHUB_WORKSPACE} -type f -name "*.sh" | grep -i xiguapi || true
+        
         SCRIPT_PATH="${GITHUB_WORKSPACE}/xiguapi/xiguapi-v3-adapt.sh"
         if [ -f "$SCRIPT_PATH" ]; then
           echo "找到适配脚本: $SCRIPT_PATH"
           chmod +x $SCRIPT_PATH
-          export OPENWRT_ROOT="${{ env.WORKDIR }}/openwrt"
           echo "OPENWRT_ROOT设置为: $OPENWRT_ROOT"
+          cd "${GITHUB_WORKSPACE}"
           $SCRIPT_PATH
           if [ $? -eq 0 ]; then
             echo "✅ xiguapi-v3适配脚本执行成功"
@@ -144,115 +150,169 @@ jobs:
           exit 1
         fi
 
-    - name: 加载自定义 feeds + 排除 luci-app-baidupcs-web
+    - name: 加载自定义 feeds
       env:
-        FEEDS_CONF_PATH: ${{ env.ARCHITECTURE }}/${{ env.FEEDS_CONF }}
-      working-directory: ${{ env.WORKDIR }}/openwrt
+        FEEDS_CONF_PATH: ${{ github.workspace }}/${{ env.ARCHITECTURE }}/${{ env.FEEDS_CONF }}
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: |
         echo "当前工作目录: $(pwd)"
         # 加载自定义feeds.conf
-        [ -e $FEEDS_CONF_PATH ] && mv $FEEDS_CONF_PATH ${{ env.FEEDS_CONF }}
-        # 执行diy-part1.sh（在此脚本中添加过滤逻辑）
-        chmod +x ${{ github.workspace }}/${{ env.DIY_P1_SH }}
-        ${{ github.workspace }}/${{ env.DIY_P1_SH }}
-        # 额外过滤：删除feeds中包含luci-app-baidupcs-web的行（防止遗漏）
+        if [ -e "$FEEDS_CONF_PATH" ]; then
+          cp "$FEEDS_CONF_PATH" ${{ env.FEEDS_CONF }}
+          echo "✅ 已加载自定义 feeds.conf"
+        else
+          echo "⚠️ 未找到自定义 feeds.conf，使用默认配置"
+        fi
+        
+        # 排除luci-app-baidupcs-web
         sed -i '/luci-app-baidupcs-web/d' ${{ env.FEEDS_CONF }}
         sed -i '/baidupcs-web/d' ${{ env.FEEDS_CONF }}
         echo "✅ 已在feeds配置中排除luci-app-baidupcs-web相关包"
-        cat ${{ env.FEEDS_CONF }} | grep -vE "baidupcs|BAIDUPCS"  # 验证过滤结果
 
     - name: 更新 feeds（第1遍）
-      working-directory: ${{ env.WORKDIR }}/openwrt
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: ./scripts/feeds update -a
 
     - name: 更新 feeds（第2遍）
-      working-directory: ${{ env.WORKDIR }}/openwrt
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: ./scripts/feeds update -a
 
     - name: 安装 feeds（第1遍）- 排除 luci-app-baidupcs-web
-      working-directory: ${{ env.WORKDIR }}/openwrt
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: ./scripts/feeds install -a -x luci-app-baidupcs-web
 
     - name: 安装 feeds（第2遍）- 排除 luci-app-baidupcs-web + 清理残留依赖
-      working-directory: ${{ env.WORKDIR }}/openwrt
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: |
         ./scripts/feeds install -a -x luci-app-baidupcs-web
         # 清理可能残留的baidupcs-web相关目录
-        rm -rf package/feeds/*/luci-app-baidupcs-web
-        rm -rf package/feeds/*/baidupcs-web
-        rm -rf package/custom/luci-app-baidupcs-web
-        rm -rf package/custom/baidupcs-web
+        rm -rf package/feeds/*/luci-app-baidupcs-web 2>/dev/null || true
+        rm -rf package/feeds/*/baidupcs-web 2>/dev/null || true
+        rm -rf package/custom/luci-app-baidupcs-web 2>/dev/null || true
+        rm -rf package/custom/baidupcs-web 2>/dev/null || true
         echo "✅ 两遍feeds安装完成，已清理baidupcs相关残留依赖"
 
-    - name: 加载自定义配置 + 验证CCACHE/LLVM配置
-      env:
-        CONFIG_FILE_PATH: ${{ github.workspace }}/${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
-      working-directory: ${{ env.WORKDIR }}/openwrt
+    - name: 执行diy-part2-6.x.sh（添加额外包）
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: |
-        echo "当前工作目录: $(pwd)"
-        [ -d "files" ] && mv files ${{ github.workspace }}/files && echo "✅ 备份 files 目录完成"
-        
-        if [ -e "$CONFIG_FILE_PATH" ]; then
-          cp "$CONFIG_FILE_PATH" "${{ env.CONFIG_FILE }}"
-          echo "✅ 加载自定义配置文件: $CONFIG_FILE_PATH"
-        else
-          echo "❌ 自定义配置文件不存在: $CONFIG_FILE_PATH"
-          echo "当前仓库根目录下的 armv8 目录内容: $(ls -la ${{ github.workspace }}/${{ env.ARCHITECTURE }}/ 2>/dev/null || true)"
-          exit 1
-        fi
-        
-        # 执行diy-part2.sh
+        echo "🔄 执行diy-part2.sh添加额外包..."
         chmod +x ${{ github.workspace }}/${{ env.DIY_P2_SH }}
         ${{ github.workspace }}/${{ env.DIY_P2_SH }}
-        echo "✅ 执行 diy-part2.sh 完成"
+        echo "✅ diy-part2.sh执行完成"
         
-        # 最终清理：确保.config中无baidupcs相关配置
-        sed -i '/luci-app-baidupcs-web/d' .config
-        sed -i '/baidupcs-web/d' .config
-        sed -i '/CONFIG_PACKAGE_luci-app-baidupcs-web/d' .config
-        sed -i '/CONFIG_PACKAGE_baidupcs-web/d' .config
-        echo "✅ 彻底移除baidupcs相关配置"
+        # 验证包已正确添加
+        echo "🔍 验证额外包..."
+        if [ -d "package/default-settings" ] && [ -d "package/luci-app-eqosplus" ]; then
+          echo "✅ 所有额外包已正确添加"
+          echo "📦 包目录内容:"
+          ls -la package/default-settings/
+          ls -la package/luci-app-eqosplus/
+        else
+          echo "❌ 部分额外包添加失败"
+          ls -la package/ | grep -E "default-settings|luci-app-eqosplus" || true
+        fi
+
+    - name: 加载自定义配置
+      env:
+        CONFIG_FILE_PATH: ${{ github.workspace }}/${{ env.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
+      working-directory: ${{ env.OPENWRT_ROOT }}
+      run: |
+        echo "📄 开始加载自定义配置..."
         
-        # 新增：验证CCACHE和LLVM配置是否启用
-        echo "===== 验证CCACHE/LLVM配置 ====="
+        # 1. 检查配置文件
+        if [ ! -f "$CONFIG_FILE_PATH" ]; then
+          echo "❌ 配置文件不存在: $CONFIG_FILE_PATH"
+          exit 1
+        fi
+        
+        # 2. 复制配置文件
+        cp "$CONFIG_FILE_PATH" "${{ env.CONFIG_FILE }}"
+        echo "✅ 已复制自定义配置文件"
+        
+        # 3. 验证关键配置项
+        echo "🔍 验证关键配置项..."
+        
+        # 必需的核心配置项
+        REQUIRED_CONFIGS=(
+          "CONFIG_TARGET_rockchip_armv8=y"
+          "CONFIG_TARGET_rockchip_armv8_DEVICE_nlnet_xiguapi-v3=y"
+          'CONFIG_TARGET_PROFILE="DEVICE_nlnet_xiguapi-v3"'
+          'CONFIG_TARGET_DEVICE_rockchip_armv8="nlnet_xiguapi-v3"'
+        )
+        
+        missing_configs=()
+        for config in "${REQUIRED_CONFIGS[@]}"; do
+          clean_config=$(echo "$config" | sed 's/"//g')
+          if grep -q "$clean_config" .config; then
+            echo "  ✅ $config"
+          else
+            echo "  ❌ $config"
+            missing_configs+=("$config")
+          fi
+        done
+        
+        if [ ${#missing_configs[@]} -gt 0 ]; then
+          echo "❌ 配置文件缺失以下必需项："
+          printf '  - %s\n' "${missing_configs[@]}"
+          echo "当前配置中相关项："
+          grep -E "CONFIG_TARGET.*rockchip|CONFIG_TARGET.*armv8|CONFIG_TARGET.*xiguapi|CONFIG_TARGET.*nlnet" .config || true
+          exit 1
+        fi
+        
+        # 4. 执行make defconfig
+        echo "⚙️ 运行 make defconfig 规范化配置..."
+        make defconfig >/dev/null 2>&1
+    
+   
+        # 6. 确保启用CCACHE
         if ! grep -q "CONFIG_CCACHE=y" .config; then
-          echo "❌ 错误：.config 中未启用 CCACHE，自动添加"
           echo "CONFIG_CCACHE=y" >> .config
+          echo "✅ 已启用CCACHE缓存"
         else
-          echo "✅ CCACHE 已启用"
+          echo "✅ CCACHE已启用"
         fi
         
-        if ! grep -q "CONFIG_USE_LLVM_BUILD=y" .config; then
-          echo "⚠️ 提示：.config 中未启用 LLVM 编译链，若需要请手动开启"
+        # 7. 验证make menuconfig兼容性
+        echo "🔧 验证make menuconfig兼容性..."
+        if grep -q "CONFIG_TARGET_rockchip_armv8_DEVICE_nlnet_xiguapi-v3" .config; then
+          echo "  ✅ Xiguapi V3 设备已在配置中激活"
         else
-          echo "✅ LLVM 编译链已启用"
-        fi
-        
-        # 验证编译目标配置
-        echo "===== 验证编译目标配置 ====="
-        if ! grep -q "CONFIG_TARGET_rockchip_armv8=y" .config; then
-          echo "❌ 错误：.config 中未选中 rockchip/armv8 目标"
-          grep -E "CONFIG_TARGET_(rockchip|ath79|ramips)" .config || true
+          echo "  ❌ Xiguapi V3 设备未激活"
           exit 1
         fi
         
-        if ! grep -q "CONFIG_TARGET_rockchip_armv8_DEVICE_nlnet_xiguapi-v3=y" .config; then
-          echo "❌ 错误：.config 中未选中 nlnet_xiguapi-v3 设备"
-          grep -E "CONFIG_TARGET_rockchip_armv8_DEVICE_" .config || true
-          exit 1
+        # 8. 最终验证和摘要
+        echo ""
+        echo "=========================================="
+        echo "✅ 配置加载完成！"
+        echo "=========================================="
+        echo "📋 设备配置摘要："
+        echo "------------------------------------------"
+        grep -E "^CONFIG_TARGET_rockchip_armv8|^CONFIG_TARGET_rockchip_armv8_DEVICE_|^CONFIG_TARGET_PROFILE|^CONFIG_TARGET_DEVICE_" .config | head -10
+        echo "------------------------------------------"
+
+    - name: 执行diy-part1-6.x.sh（版本信息修改）
+      working-directory: ${{ env.OPENWRT_ROOT }}
+      run: |
+        echo "🔄 执行diy-part1.sh修改版本信息..."
+        chmod +x ${{ github.workspace }}/${{ env.DIY_P1_SH }}
+        ${{ github.workspace }}/${{ env.DIY_P1_SH }}
+        echo "✅ diy-part1.sh执行完成"
+        
+        # 验证版本信息修改
+        echo "🔍 验证版本信息修改..."
+        if [ -f ".vermagic" ]; then
+          echo "✅ 内核校验码文件已生成"
+          cat .vermagic
         fi
         
-        if grep -q "CONFIG_TARGET_ath79=y" .config; then
-          echo "❌ 错误：.config 中仍选中了 ath79 目标，需禁用"
-          sed -i '/CONFIG_TARGET_ath79=y/d' .config
-          sed -i 's/CONFIG_TARGET_ath79=.*/# CONFIG_TARGET_ath79 is not set/' .config
-          echo "✅ 已禁用 ath79 目标"
+        if [ -f "version" ]; then
+          echo "✅ 版本号文件已生成"
+          cat version
         fi
-        
-        echo "===== 编译目标配置验证通过 ====="
 
     - name: 下载软件包（第1遍）
-      working-directory: ${{ env.WORKDIR }}/openwrt
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: |
         make defconfig
         make download -j8
@@ -260,26 +320,31 @@ jobs:
         find dl -size -1024c -exec rm -f {} \;
 
     - name: 下载软件包（第2遍）
-      working-directory: ${{ env.WORKDIR }}/openwrt
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: |
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
-    - name: 编译固件（优化：启用CCACHE+LLVM，失败时单线程调试）
+    - name: 编译固件
       id: compile
-      working-directory: ${{ env.WORKDIR }}/openwrt
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: |
         echo "当前工作目录: $(pwd)"
         echo "CCACHE 状态（编译前）:"
-        ccache -s  # 新增：查看ccache状态
+        ccache -s
+        
         echo -e "$(nproc) thread compile (CCACHE+LLVM)"
-        # 启用CCACHE和LLVM编译链，首次多线程编译，失败则单线程带日志调试
         export CCACHE_DIR=${{ env.CCACHE_DIR }}
         export USE_CCACHE=1
+        
+        # 首次多线程编译，失败则单线程带日志调试
         make -j$(nproc) || make -j1 V=s
+        
         # 查看CCACHE使用情况
-        ccache -s  # 新增：查看ccache编译后状态
+        echo "CCACHE 状态（编译后）:"
+        ccache -s
+        
         # 检查编译结果
         if [ -d "bin/targets" ]; then
           echo "✅ 编译成功，开始整理固件"
@@ -288,6 +353,7 @@ jobs:
           echo "❌ 编译失败，无目标输出目录"
           exit 1
         fi
+        
         # 记录编译时间
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
@@ -300,15 +366,16 @@ jobs:
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.FILE_DATE }}
-        path: ${{ env.WORKDIR }}/openwrt/bin
-        retention-days: 7  # 保留7天，节省空间
+        path: ${{ env.OPENWRT_ROOT }}/bin
+        retention-days: 7
 
     - name: 整理固件文件
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-      working-directory: ${{ env.WORKDIR }}/openwrt
+      working-directory: ${{ env.OPENWRT_ROOT }}
       run: |
         echo "当前工作目录: $(pwd)"
+        
         # 定位固件目录
         if [ -d "bin/targets/rockchip/armv8" ]; then
           FIRMWARE_DIR="bin/targets/rockchip/armv8"
@@ -337,6 +404,9 @@ jobs:
           exit 1
         fi
         
+        echo "找到固件文件:"
+        ls *.bin *.img *.gz 2>/dev/null || true
+        
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "FIRMWARE_FILES=$FIRMWARE_COUNT" >> $GITHUB_ENV
         echo "status=success" >> ${GITHUB_OUTPUT}
@@ -347,7 +417,7 @@ jobs:
       with:
         name: OpenWrt_firmware${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
-        retention-days: 30  # 固件保留30天
+        retention-days: 30
 
     - name: 生成发布标签和说明
       id: tag

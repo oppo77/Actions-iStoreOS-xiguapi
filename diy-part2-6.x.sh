@@ -35,13 +35,3 @@ git clone --depth=1 -b main https://github.com/xiaomeng9597/istoreos-settings pa
 
 # 定时限速插件
 git clone --depth=1 https://github.com/sirpdboy/luci-app-eqosplus package/luci-app-eqosplus
-
-# 适配Xiguapi V3设备
-if [ -f "$GITHUB_WORKSPACE/xiguapi/xiguapi-v3-adapt.sh" ]; then
-    echo "正在适配Xiguapi V3设备..."
-    chmod +x "$GITHUB_WORKSPACE/xiguapi/xiguapi-v3-adapt.sh"
-    # 在OpenWrt源码目录中运行适配脚本
-    "$GITHUB_WORKSPACE/xiguapi/xiguapi-v3-adapt.sh"
-else
-    echo "警告: 未找到Xiguapi V3适配脚本"
-fi

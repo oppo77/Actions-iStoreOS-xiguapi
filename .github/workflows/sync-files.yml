@@ -27,14 +27,28 @@ jobs:
            # 追加自定义配置到.config末尾
            echo -e "\\n$configdata" >> ./armv8/.config
 
-           # ========== 优化后的删除逻辑 ==========
-           # 1. 批量删除所有 CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE 开头的配置项（单个命令）
+           # ========== 新增：配置优化修改 ==========
+           # 1. 关闭 CONFIG_ALL_KMODS=y，改为禁用
+           sed -i 's/^CONFIG_ALL_KMODS=y$/# CONFIG_ALL_KMODS is not set/' ./armv8/.config
+           # 2. 修改根分区大小为 1024MB
+           sed -i 's/^CONFIG_TARGET_ROOTFS_PARTSIZE=256$/CONFIG_TARGET_ROOTFS_PARTSIZE=1024/' ./armv8/.config
+           # 3. 将 libevent2 相关模块从可安装包(m)改为内置(y)
+           sed -i 's/^CONFIG_PACKAGE_libevent2-core=m$/CONFIG_PACKAGE_libevent2-core=y/' ./armv8/.config
+           sed -i 's/^CONFIG_PACKAGE_libevent2-openssl=m$/CONFIG_PACKAGE_libevent2-openssl=y/' ./armv8/.config
+           sed -i 's/^CONFIG_PACKAGE_libevent2-pthreads=m$/CONFIG_PACKAGE_libevent2-pthreads=y/' ./armv8/.config
+           # 4. 关闭调试信息配置，减少固件体积
+           sed -i 's/^CONFIG_REPRODUCIBLE_DEBUG_INFO=y$/# CONFIG_REPRODUCIBLE_DEBUG_INFO is not set/' ./armv8/.config
+           sed -i 's/^CONFIG_KERNEL_DEBUG_INFO_BTF=y$/# CONFIG_KERNEL_DEBUG_INFO_BTF is not set/' ./armv8/.config
+           # =======================================
+
+           # ========== 原有：删除旧设备配置 ==========
            sed -i '/^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE/d' ./armv8/.config
-           # 2. 删除 CONFIG_TARGET_MULTI_PROFILE=y 配置项
            sed -i '/^CONFIG_TARGET_MULTI_PROFILE=y$/d' ./armv8/.config
            # =====================================
 
-           # 清除重复配置项 + 过滤空行
+           # =========================================
+
+           # 原有：清除重复配置项 + 过滤空行
            configdata2=$(cat ./armv8/.config)
            echo "$configdata2" | awk '!seen[$0]++ && NF > 0' > ./armv8/.config
         else
@@ -51,7 +65,7 @@ jobs:
         user_email: 'github-actions[bot]@github.com'
         exclude_assets: ''
         keep_files: true
-        commit_message: "Sync files"
+        commit_message: "Sync files: 优化配置（关闭全模块/扩容分区/调整libevent2/关闭调试）"
 
     - name: 删除运行记录
       uses: xiaomeng9597/delete-workflow-runs@main

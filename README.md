@@ -19,8 +19,8 @@
 | **电源** | RK817-5（兼容rk808h）DC 12V 1.5A |
 | **ROM** | 32GB eMMC（闪迪 SanDisk SDINBDA4-32G） |
 | **RAM** | 4GB LPDDR4X（长鑫 CXMT CXDB5CCBM-MK-A） |
-| **网络接口**  | 2个 RTL8211F 千兆网口 |
-| **扩展接口**  | 2个 MINIPCIE 接口（带5V电源PA供电）<br>1个 M.2 B Key接口（5G模块）<br>1个 M.2 E Key接口（WiFi网卡）<br>1个 USB3.0 A口（OTG接口）<br>1个 TF卡槽<br>1个 SIM卡槽 |
+| **网络接**  | 2个 RTL8211F 千兆网口 |
+| **扩展**  | 2个 MINIPCIE 接口（带5V电源PA供电）<br>1个 M.2 B Key接口（5G模块）<br>1个 M.2 E Key接口（WiFi网卡）<br>1个 USB3.0 A口（OTG接口）<br>1个 TF卡槽<br>1个 SIM卡槽 |
 | **视频输出**  | 1个 HDMI2.0 接口 |
 | **其他接口**  | 1个 FPC SPI/I2C 显示屏接口<br>1个 5V风扇接口（MX1.25 4pin PWM调速）<br>1个 DC 5521电源插头（5V-18V 1-3A） |
 | **指示灯** | 3个 LED指示灯（状态、网络、电源） |

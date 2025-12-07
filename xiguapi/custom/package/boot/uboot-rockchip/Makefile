@@ -261,12 +261,14 @@ define U-Boot/rock-3b-rk3568
     radxa_rock-3b
 endef
 
+
 define U-Boot/xiguapi-v3-rk3568
   $(U-Boot/rk3568/Default)
   NAME:=Xiguapi V3
   UBOOT_CONFIG:=rk3568-xiguapi-v3
+  UBOOT_DTS:=rk3568-xiguapi-v3
   BUILD_DEVICES:= \
-       nlnet_xiguapi-v3
+      nlnet_xiguapi-v3
 endef
 
 

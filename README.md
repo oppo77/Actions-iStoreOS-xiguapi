@@ -73,6 +73,10 @@
 
 ---
 
+##支持一杯☕️
+
+
+
 ## 🙏 鸣谢
 
 本项目的实现离不开以下优秀项目与服务的支持：
@@ -85,3 +89,5 @@
 - [draco-china/istoreos-actions](https://github.com/draco-china/istoreos-actions) - 项目参考
 - [xiaomeng9597/Actions-iStoreOS-RK35XX-24.10/](https://github.com/xiaomeng9597) 
 - 以及所有相关工具与服务的开发者们
+
+

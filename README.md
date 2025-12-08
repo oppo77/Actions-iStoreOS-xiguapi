@@ -77,8 +77,12 @@
 
 ## 支持一杯☕
 > 零代码小白第一次制作固件，花了很多时间精力，觉得不错可以支持一下后续维护更卖力🥺🥺
-
-
+<div align="center">
+  <img src="https://raw.githubusercontent.com/oppo77/Actions-iStoreOS-xiguapi/main/other/skm.png" 
+       alt="vx" 
+       title="可选的标题，鼠标悬停时显示" 
+       width="800" /> <!-- 宽度可按需修改，如 700/900 或 90% -->
+</div>
 ## ‼️ 免责声明
 ### **使用本固件即表示您已阅读、理解并同意以下条款：**
 

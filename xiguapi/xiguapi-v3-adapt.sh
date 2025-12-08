@@ -1,8 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-# Xiguapi V3 设备适配脚本（简化版，只处理设备树和 legacy.mk）
 
-# 1. 自动设置/检查 OPENWRT_ROOT 路径
 OPENWRT_ROOT=${OPENWRT_ROOT:-$(pwd)/openwrt}
 if [ ! -d "${OPENWRT_ROOT}" ]; then
     echo -e "\n❌ 错误：OPENWRT_ROOT=${OPENWRT_ROOT} 目录不存在！"
@@ -10,15 +8,12 @@ if [ ! -d "${OPENWRT_ROOT}" ]; then
     exit 1
 fi
 
-# 2. 定义路径常量
 CUSTOM_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/custom"
 echo -e "✅ 自动识别自定义配置目录：CUSTOM_CONFIG_DIR=${CUSTOM_CONFIG_DIR}"
 
-# OpenWRT 源码内的目标路径
 DTS_CHECK_PATH="${OPENWRT_ROOT}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
 LEGACY_MK_PATH="${OPENWRT_ROOT}/target/linux/rockchip/image/legacy.mk"
 
-# 3. 辅助函数
 check_file() {
     local file_path="$1"
     local desc="$2"
@@ -39,11 +34,9 @@ check_dir() {
     fi
 }
 
-# 4. 清理残留的侵入式修改
 echo -e "\n【1/5】清理可能的残留侵入式修改..."
 cd "${OPENWRT_ROOT}"
 
-# 清理旧的设备定义（如果存在）
 if [ -f "${LEGACY_MK_PATH}" ]; then
     sed -i '/define Device\/nlnet_xiguapi-v3/,/endef/d' "${LEGACY_MK_PATH}" 2>/dev/null || true
     sed -i '/TARGET_DEVICES += nlnet_xiguapi-v3/d' "${LEGACY_MK_PATH}" 2>/dev/null || true
@@ -51,11 +44,9 @@ fi
 
 echo -e "✅ 已清理源码中残留的侵入式配置"
 
-# 5. 检查自定义配置目录和设备树文件
 echo -e "\n【2/5】检查自定义配置和设备树文件..."
 check_dir "${CUSTOM_CONFIG_DIR}" "自定义配置根目录"
 
-# 只需要检查设备树文件
 required_files=(
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts:Xiguapi V3 主设备树"
 )
@@ -66,40 +57,28 @@ for file_info in "${required_files[@]}"; do
 done
 echo -e "✅ 自定义配置和设备树文件检查通过"
 
-# 6. 部署设备树文件到 OpenWRT 源码
 echo -e "\n【3/5】部署设备树文件到 OpenWRT 源码..."
-# 创建必要的目标目录
 mkdir -p "$(dirname "${DTS_CHECK_PATH}")"
-
-# 复制设备树文件
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts" "${DTS_CHECK_PATH}"
-
 echo -e "✅ 设备树文件部署完成"
 echo -e "  📍 主设备树：${DTS_CHECK_PATH}"
 
-# 7. 添加 nlnet_xiguapi-v3 设备定义到 legacy.mk
 echo -e "\n【4/5】添加设备定义到 legacy.mk 文件..."
 
-# 确保 legacy.mk 文件存在
 if [ ! -f "${LEGACY_MK_PATH}" ]; then
-    echo -e "⚠️  legacy.mk 文件不存在，将创建"
-    mkdir -p "$(dirname "${LEGACY_MK_PATH}")"
-    touch "${LEGACY_MK_PATH}"
-fi
+    echo -e "⚠️  legacy.mk 文件不存在，不可创建"
+    verify_pass=1
+else
+    if grep -q "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}"; then
+        echo -e "⚠️  设备定义已存在，先清理旧的"
+        sed -i '/define Device\/nlnet_xiguapi-v3/,/TARGET_DEVICES += nlnet_xiguapi-v3/d' "${LEGACY_MK_PATH}" 2>/dev/null || true
+    fi
 
-# 检查是否已存在设备定义，避免重复添加
-if grep -q "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}"; then
-    echo -e "⚠️  设备定义已存在，先清理旧的"
-    sed -i '/define Device\/nlnet_xiguapi-v3/,/TARGET_DEVICES += nlnet_xiguapi-v3/d' "${LEGACY_MK_PATH}" 2>/dev/null || true
-fi
+    if [ -n "$(tail -c1 "${LEGACY_MK_PATH}")" ]; then
+        echo "" >> "${LEGACY_MK_PATH}"
+    fi
 
-# 确保文件末尾有换行
-if [ -n "$(tail -c1 "${LEGACY_MK_PATH}")" ]; then
-    echo "" >> "${LEGACY_MK_PATH}"
-fi
-
-# 添加新的设备定义，确保前面有空行
-cat >> "${LEGACY_MK_PATH}" << 'EOF'
+    cat >> "${LEGACY_MK_PATH}" << 'EOF'
 
 define Device/nlnet_xiguapi-v3
 $(call Device/Legacy/rk3568,$(1))
@@ -111,13 +90,12 @@ endef
 TARGET_DEVICES += nlnet_xiguapi-v3
 EOF
 
-echo -e "✅ 设备定义已添加到 legacy.mk"
+    echo -e "✅ 设备定义已添加到 legacy.mk"
+fi
 
-# 8. 验证部署结果
 echo -e "\n【5/5】验证自定义配置部署结果..."
 verify_pass=0
 
-# 检查设备树文件是否存在
 if [ -f "${DTS_CHECK_PATH}" ]; then
     echo -e "✅ 主设备树文件部署成功"
 else
@@ -125,16 +103,39 @@ else
     verify_pass=1
 fi
 
-# 验证 legacy.mk 是否添加成功
 if [ -f "${LEGACY_MK_PATH}" ]; then
     if grep -q "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}"; then
         echo -e "✅ legacy.mk 中已添加 nlnet_xiguapi-v3 设备定义"
-        echo -e "\n📄 展示 legacy.mk 中包含 nlnet_xiguapi-v3 的上下文："
-        echo -e "=========================================="
-        grep -n -A 5 -B 2 "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}" 2>/dev/null || echo "未找到相关行"
-        echo -e "=========================================="
         
-        # 检查空行格式
+        start_line=$(grep -n "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}" | cut -d: -f1)
+        if [ -n "$start_line" ]; then
+            echo -e "\n📄 显示完整的设备定义内容："
+            echo -e "=========================================="
+            
+            total_lines=$(wc -l < "${LEGACY_MK_PATH}")
+            end_line=$((start_line + 14))
+            if [ $end_line -gt $total_lines ]; then
+                end_line=$total_lines
+            fi
+            
+            sed -n "${start_line},${end_line}p" "${LEGACY_MK_PATH}" | cat -n
+            
+            echo -e "=========================================="
+            
+            if sed -n "${start_line},${end_line}p" "${LEGACY_MK_PATH}" | grep -q "TARGET_DEVICES += nlnet_xiguapi-v3"; then
+                echo -e "✅ 设备定义完整（包含 TARGET_DEVICES 行）"
+            else
+                echo -e "⚠️  设备定义可能不完整，未找到 TARGET_DEVICES 行"
+                if grep -q "TARGET_DEVICES += nlnet_xiguapi-v3" "${LEGACY_MK_PATH}"; then
+                    t_line=$(grep -n "TARGET_DEVICES += nlnet_xiguapi-v3" "${LEGACY_MK_PATH}" | cut -d: -f1)
+                    echo -e "🔍 TARGET_DEVICES 行位于第 ${t_line} 行"
+                fi
+            fi
+        else
+            echo -e "❌ 无法找到设备定义的具体位置"
+            verify_pass=1
+        fi
+        
         echo -e "\n🔍 检查设备定义格式："
         if grep -B1 "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}" | head -1 | grep -q "^$"; then
             echo -e "✅ 设备定义前面有空行，格式正确"
@@ -150,7 +151,6 @@ else
     verify_pass=1
 fi
 
-# 9. 最终结果
 if [ ${verify_pass} -eq 0 ]; then
     echo -e "\n🎉 Xiguapi V3 设备适配成功！"
     echo -e "=========================================="

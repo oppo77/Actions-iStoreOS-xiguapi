@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-# Xiguapi V3 设备适配脚本（专注硬件适配，不修改配置）
+# Xiguapi V3 设备适配脚本（简化版，只处理设备树和 legacy.mk）
 
 # 1. 自动设置/检查 OPENWRT_ROOT 路径
 OPENWRT_ROOT=${OPENWRT_ROOT:-$(pwd)/openwrt}
@@ -11,14 +11,11 @@ if [ ! -d "${OPENWRT_ROOT}" ]; then
 fi
 
 # 2. 定义路径常量
-# 注意：在GitHub Actions中，脚本位于仓库根目录下的xiguapi目录，自定义配置在xiguapi/custom
 CUSTOM_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/custom"
 echo -e "✅ 自动识别自定义配置目录：CUSTOM_CONFIG_DIR=${CUSTOM_CONFIG_DIR}"
 
 # OpenWRT 源码内的目标路径
 DTS_CHECK_PATH="${OPENWRT_ROOT}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts"
-UBOOT_MAKEFILE_CHECK_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/Makefile"
-PATCH_CHECK_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/patches/108-add-xiguapi-v3-support.patch"
 LEGACY_MK_PATH="${OPENWRT_ROOT}/target/linux/rockchip/image/legacy.mk"
 
 # 3. 辅助函数
@@ -43,12 +40,8 @@ check_dir() {
 }
 
 # 4. 清理残留的侵入式修改
-echo -e "\n【1/6】清理可能的残留侵入式修改..."
+echo -e "\n【1/5】清理可能的残留侵入式修改..."
 cd "${OPENWRT_ROOT}"
-
-# 清理可能的旧UBoot配置片段
-sed -i '/define U-Boot\/xiguapi-v3-rk3568/,/endef/ d' "${UBOOT_MAKEFILE_CHECK_PATH}" 2>/dev/null || true
-sed -i '/xiguapi-v3-rk3568 \\/d' "${UBOOT_MAKEFILE_CHECK_PATH}" 2>/dev/null || true
 
 # 清理旧的设备定义（如果存在）
 if [ -f "${LEGACY_MK_PATH}" ]; then
@@ -58,43 +51,36 @@ fi
 
 echo -e "✅ 已清理源码中残留的侵入式配置"
 
-# 5. 检查自定义配置目录和核心文件
-echo -e "\n【2/6】检查自定义配置核心文件..."
+# 5. 检查自定义配置目录和设备树文件
+echo -e "\n【2/5】检查自定义配置和设备树文件..."
 check_dir "${CUSTOM_CONFIG_DIR}" "自定义配置根目录"
 
+# 只需要检查设备树文件
 required_files=(
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts:Xiguapi V3 主设备树"
-    "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/Makefile:自定义 UBoot Makefile"
-    "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/patches/108-add-xiguapi-v3-support.patch:U-Boot 补丁文件"
 )
 for file_info in "${required_files[@]}"; do
     file_path=$(echo "$file_info" | cut -d: -f1)
     file_desc=$(echo "$file_info" | cut -d: -f2)
     check_file "${file_path}" "${file_desc}"
 done
-echo -e "✅ 自定义配置核心文件检查通过"
+echo -e "✅ 自定义配置和设备树文件检查通过"
 
-# 6. 部署自定义配置到 OpenWRT 源码
-echo -e "\n【3/6】部署自定义配置到 OpenWRT 源码..."
+# 6. 部署设备树文件到 OpenWRT 源码
+echo -e "\n【3/5】部署设备树文件到 OpenWRT 源码..."
 # 创建必要的目标目录
 mkdir -p "$(dirname "${DTS_CHECK_PATH}")"
-mkdir -p "$(dirname "${UBOOT_MAKEFILE_CHECK_PATH}")"
-mkdir -p "$(dirname "${PATCH_CHECK_PATH}")"
 
-# 按需复制文件
+# 复制设备树文件
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/dts/rk3568/rk3568-xiguapi-v3.dts" "${DTS_CHECK_PATH}"
-cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/Makefile" "${UBOOT_MAKEFILE_CHECK_PATH}"
-cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/patches/108-add-xiguapi-v3-support.patch" "${PATCH_CHECK_PATH}"
 
-echo -e "✅ 自定义配置部署完成"
+echo -e "✅ 设备树文件部署完成"
 echo -e "  📍 主设备树：${DTS_CHECK_PATH}"
-echo -e "  📍 UBoot Makefile：${UBOOT_MAKEFILE_CHECK_PATH}"
-echo -e "  📍 UBoot 补丁文件：${PATCH_CHECK_PATH}"
 
-# 7. 添加nlnet_xiguapi-v3设备定义（修正格式，确保有空行）
-echo -e "\n【4/6】添加设备定义到 legacy.mk 文件..."
+# 7. 添加 nlnet_xiguapi-v3 设备定义到 legacy.mk
+echo -e "\n【4/5】添加设备定义到 legacy.mk 文件..."
 
-# 确保legacy.mk文件存在
+# 确保 legacy.mk 文件存在
 if [ ! -f "${LEGACY_MK_PATH}" ]; then
     echo -e "⚠️  legacy.mk 文件不存在，将创建"
     mkdir -p "$(dirname "${LEGACY_MK_PATH}")"
@@ -127,11 +113,11 @@ EOF
 
 echo -e "✅ 设备定义已添加到 legacy.mk"
 
-# 8. 验证自定义配置部署结果
-echo -e "\n【5/6】验证自定义配置部署结果..."
+# 8. 验证部署结果
+echo -e "\n【5/5】验证自定义配置部署结果..."
 verify_pass=0
 
-# 检查关键文件是否存在
+# 检查设备树文件是否存在
 if [ -f "${DTS_CHECK_PATH}" ]; then
     echo -e "✅ 主设备树文件部署成功"
 else
@@ -139,74 +125,13 @@ else
     verify_pass=1
 fi
 
-if [ -f "${UBOOT_MAKEFILE_CHECK_PATH}" ]; then
-    echo -e "✅ UBoot Makefile 部署成功"
-    
-    # 详细检查UBoot配置是否包含xiguapi-v3定义
-    echo -e "\n🔍 检查UBoot Makefile中的xiguapi-v3-rk3568配置："
-    
-    # 检查完整的U-Boot定义
-    if grep -q "define U-Boot/xiguapi-v3-rk3568" "${UBOOT_MAKEFILE_CHECK_PATH}"; then
-        echo -e "✅ UBoot Makefile 包含 define U-Boot/xiguapi-v3-rk3568"
-        
-        # 检查定义的具体内容
-        echo -e "\n📄 显示UBoot定义的具体内容："
-        grep -A 10 "define U-Boot/xiguapi-v3-rk3568" "${UBOOT_MAKEFILE_CHECK_PATH}" || true
-        
-        # 检查各个关键字段
-        if grep -A 10 "define U-Boot/xiguapi-v3-rk3568" "${UBOOT_MAKEFILE_CHECK_PATH}" | grep -q "NAME:=Xiguapi V3"; then
-            echo -e "✅ NAME:=Xiguapi V3 配置正确"
-        else
-            echo -e "❌ 缺失 NAME:=Xiguapi V3 配置"
-            verify_pass=1
-        fi
-        
-        if grep -A 10 "define U-Boot/xiguapi-v3-rk3568" "${UBOOT_MAKEFILE_CHECK_PATH}" | grep -q "UBOOT_CONFIG:=xiguapi-v3"; then
-            echo -e "✅ UBOOT_CONFIG:=xiguapi-v3 配置正确"
-        else
-            echo -e "❌ 缺失 UBOOT_CONFIG:=xiguapi-v3 配置"
-            verify_pass=1
-        fi
-        
-        if grep -A 10 "define U-Boot/xiguapi-v3-rk3568" "${UBOOT_MAKEFILE_CHECK_PATH}" | grep -q "BUILD_DEVICES:="; then
-            echo -e "✅ BUILD_DEVICES 配置存在"
-            # 检查是否包含nlnet_xiguapi-v3
-            if grep -A 10 "define U-Boot/xiguapi-v3-rk3568" "${UBOOT_MAKEFILE_CHECK_PATH}" | grep -q "nlnet_xiguapi-v3"; then
-                echo -e "✅ BUILD_DEVICES 包含 nlnet_xiguapi-v3"
-            else
-                echo -e "❌ BUILD_DEVICES 未包含 nlnet_xiguapi-v3"
-                verify_pass=1
-            fi
-        else
-            echo -e "❌ 缺失 BUILD_DEVICES 配置"
-            verify_pass=1
-        fi
-        
-    else
-        echo -e "❌ UBoot Makefile 缺失 define U-Boot/xiguapi-v3-rk3568"
-        echo -e "📄 显示Makefile中已有的U-Boot定义："
-        grep -n "define U-Boot/" "${UBOOT_MAKEFILE_CHECK_PATH}" | head -10 || true
-        verify_pass=1
-    fi
-else
-    echo -e "❌ UBoot Makefile 部署失败"
-    verify_pass=1
-fi
-
-if [ -f "${PATCH_CHECK_PATH}" ]; then
-    echo -e "✅ UBoot 补丁文件部署成功"
-else
-    echo -e "❌ UBoot 补丁文件部署失败"
-    verify_pass=1
-fi
-
-# 验证legacy.mk是否添加成功
+# 验证 legacy.mk 是否添加成功
 if [ -f "${LEGACY_MK_PATH}" ]; then
     if grep -q "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}"; then
         echo -e "✅ legacy.mk 中已添加 nlnet_xiguapi-v3 设备定义"
-        echo -e "\n📄 展示 legacy.mk 中包含 nlnet_xiguapi-v3 的上下文（前后5行）："
+        echo -e "\n📄 展示 legacy.mk 中包含 nlnet_xiguapi-v3 的上下文："
         echo -e "=========================================="
-        grep -n -A 5 -B 5 "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}" 2>/dev/null || echo "未找到相关行"
+        grep -n -A 5 -B 2 "define Device/nlnet_xiguapi-v3" "${LEGACY_MK_PATH}" 2>/dev/null || echo "未找到相关行"
         echo -e "=========================================="
         
         # 检查空行格式
@@ -215,7 +140,6 @@ if [ -f "${LEGACY_MK_PATH}" ]; then
             echo -e "✅ 设备定义前面有空行，格式正确"
         else
             echo -e "⚠️  设备定义前面缺少空行（非致命警告）"
-            # 这只是警告，不标记为失败
         fi
     else
         echo -e "❌ legacy.mk 中未找到 nlnet_xiguapi-v3 设备定义"
@@ -227,18 +151,17 @@ else
 fi
 
 # 9. 最终结果
-echo -e "\n【6/6】适配结果汇总..."
 if [ ${verify_pass} -eq 0 ]; then
     echo -e "\n🎉 Xiguapi V3 设备适配成功！"
     echo -e "=========================================="
     echo -e "✅ 设备树文件已部署"
-    echo -e "✅ UBoot Makefile 已更新（包含完整xiguapi-v3-rk3568定义）"
-    echo -e "✅ UBoot 补丁文件已部署"
     echo -e "✅ 设备定义已添加到 legacy.mk"
     echo -e "✅ 设备定义格式已验证"
     echo -e "=========================================="
     echo -e "📋 说明："
-    echo -e "  - 此脚本仅完成硬件适配"
+    echo -e "  - 此脚本只完成了硬件适配的基础部分"
+    echo -e "  - 设备树文件已复制到正确位置"
+    echo -e "  - 设备定义已添加到编译系统中"
     echo -e "  - 请在工作流后续步骤中加载 .config 文件"
     echo -e "  - 确保 .config 中包含设备配置选项"
     echo -e "=========================================="
@@ -246,10 +169,8 @@ if [ ${verify_pass} -eq 0 ]; then
 else
     echo -e "\n❌ 设备适配失败，请检查以上错误！"
     echo -e "\n💡 调试建议："
-    echo -e "  1. 检查自定义UBoot Makefile是否包含正确的 'define U-Boot/xiguapi-v3-rk3568' 定义"
-    echo -e "  2. 确保定义中包含：NAME:=Xiguapi V3"
-    echo -e "  3. 确保定义中包含：UBOOT_CONFIG:=xiguapi-v3"
-    echo -e "  4. 确保定义中包含：BUILD_DEVICES 且其中有 nlnet_xiguapi-v3"
-    echo -e "  5. 查看上面的详细错误信息"
+    echo -e "  1. 检查自定义设备树文件是否正确"
+    echo -e "  2. 检查 legacy.mk 文件是否可写"
+    echo -e "  3. 查看上面的详细错误信息"
     exit 1
 fi

@@ -27,7 +27,35 @@ jobs:
            # 追加自定义配置到.config末尾
            echo -e "\\n$configdata" >> ./armv8/.config
 
-           # ... [中间的所有 sed 修改操作保持不变] ...
+           # ========== 原有：配置优化修改 ==========
+           # 1. 关闭 CONFIG_ALL_KMODS=y，改为禁用
+           sed -i 's/^CONFIG_ALL_KMODS=y$/# CONFIG_ALL_KMODS is not set/' ./armv8/.config
+           # 2. 修改根分区大小为 2048MB
+           sed -i 's/^CONFIG_TARGET_ROOTFS_PARTSIZE=256$/CONFIG_TARGET_ROOTFS_PARTSIZE=2048/' ./armv8/.config
+           # 3. 将 libevent2 相关模块从可安装包(m)改为内置(y)
+           sed -i 's/^CONFIG_PACKAGE_libevent2-core=m$/CONFIG_PACKAGE_libevent2-core=y/' ./armv8/.config
+           sed -i 's/^CONFIG_PACKAGE_libevent2-openssl=m$/CONFIG_PACKAGE_libevent2-openssl=y/' ./armv8/.config
+           sed -i 's/^CONFIG_PACKAGE_libevent2-pthreads=m$/CONFIG_PACKAGE_libevent2-pthreads=y/' ./armv8/.config
+           # 4. 禁用 wpad-basic-mbedtls 包
+           sed -i 's/^CONFIG_PACKAGE_wpad-basic-mbedtls=m$/# CONFIG_PACKAGE_wpad-basic-mbedtls is not set/' ./armv8/.config
+           # 5. 关闭调试信息配置，减少固件体积
+           sed -i 's/^CONFIG_REPRODUCIBLE_DEBUG_INFO=y$/# CONFIG_REPRODUCIBLE_DEBUG_INFO is not set/' ./armv8/.config
+           sed -i 's/^CONFIG_KERNEL_DEBUG_INFO_BTF=y$/# CONFIG_KERNEL_DEBUG_INFO_BTF is not set/' ./armv8/.config
+           # =======================================
+
+           # ========== 新增：强制关闭 LLVM 编译链 ==========
+           # 【核心】无论从哪个源来的 LLVM 配置，都强制关闭，确保使用 GCC
+           sed -i 's/^CONFIG_USE_LLVM_BUILD=y$/# CONFIG_USE_LLVM_BUILD is not set/' ./armv8/.config
+           # 同时关闭内核相关的 LLVM 选项，确保彻底
+           sed -i 's/^CONFIG_KERNEL_LLVM=y$/# CONFIG_KERNEL_LLVM is not set/' ./armv8/.config
+           sed -i 's/^CONFIG_KERNEL_CLANG=y$/# CONFIG_KERNEL_CLANG is not set/' ./armv8/.config
+           echo "✅ 已强制关闭所有 LLVM/Clang 相关编译选项。"
+           # ================================================
+
+           # ========== 原有：删除旧设备配置 ==========
+           sed -i '/^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE/d' ./armv8/.config
+           sed -i '/^CONFIG_TARGET_MULTI_PROFILE=y$/d' ./armv8/.config
+           # =====================================
 
            # 原有：清除重复配置项 + 过滤空行
            configdata2=$(cat ./armv8/.config)
@@ -48,37 +76,9 @@ jobs:
         keep_files: true
         commit_message: "Sync files: 优化配置（关闭全模块/扩容分区/调整libevent2/禁用wpad-basic-mbedtls/关闭调试/强制使用GCC）"
 
-    # 将清理步骤移到这里，作为 sync job 的最后一个步骤
-    - name: 清理旧工作流运行记录（自定义）
-      if: always()
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        echo "开始清理旧的工作流运行记录..."
-        
-        # 获取当前工作流的所有运行ID（排除正在运行的）
-        runs=$(gh run list --workflow="${{ github.workflow }}" --json databaseId,status,createdAt --jq '.[] | select(.status != "in_progress" and .status != "queued") | "\(.databaseId) \(.createdAt)"' | sort -k2)
-        
-        # 计算要保留的数量（保留最新的10条）
-        total_to_keep=10
-        total_runs=$(echo "$runs" | wc -l)
-        
-        if [ $total_runs -le $total_to_keep ]; then
-          echo "当前只有 ${total_runs} 条记录，未超过保留上限 ${total_to_keep}，跳过清理。"
-          exit 0
-        fi
-        
-        # 计算需要删除的数量
-        runs_to_delete=$((total_runs - total_to_keep))
-        echo "找到 ${total_runs} 条记录，计划删除最旧的 ${runs_to_delete} 条。"
-        
-        # 提取需要删除的ID（最旧的前runs_to_delete条）
-        delete_ids=$(echo "$runs" | head -n $runs_to_delete | awk '{print $1}')
-        
-        # 循环删除
-        for run_id in $delete_ids; do
-          echo "正在删除运行记录 ID: $run_id"
-          gh run delete "$run_id" --confirm || echo "删除 $run_id 失败（可能已被其他进程删除）"
-        done
-        
-        echo "✅ 工作流运行记录清理完成。"
+    - name: 删除运行记录
+      uses: xiaomeng9597/delete-workflow-runs@main
+      with:
+        retain_days: 20
+        keep_minimum_runs: 15
+        token: ${{ secrets.GITHUB_TOKEN }}

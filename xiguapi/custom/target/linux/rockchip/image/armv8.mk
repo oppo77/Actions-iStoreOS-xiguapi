@@ -180,9 +180,9 @@ define Device/nlnet_xiguapi-v3
   DEVICE_VENDOR := NLnet
   DEVICE_MODEL := XiGuaPi V3
   SOC := rk3568
+  SUPPORTED_DEVICES := nlnet,xiguapi-v3
   UBOOT_DEVICE_NAME := generic-rk3568
   DEVICE_DTS := rockchip/rk3568-xiguapi-v3
-  SUPPORTED_DEVICES := nlnet,xiguapi-v3
   IMAGE/sysupgrade.img.gz := boot-common | boot-script | pine64-img | gzip | append-metadata
   DEVICE_PACKAGES := kmod-hwmon-pwmfan
 endef

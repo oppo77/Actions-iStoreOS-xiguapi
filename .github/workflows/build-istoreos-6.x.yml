@@ -283,7 +283,7 @@ jobs:
         echo "release_tag=v$(date +"%Y.%m.%d-%H.%M")-xiguapi-v3" >> ${GITHUB_OUTPUT}
         touch release.txt
         echo "
-        🚀 iStore OS 6.x for Xiguapi V3
+        🚀 iStore OS 24.10.2 for Xiguapi V3
         -----------------------------------------
         💻 设备型号: Xiguapi V3
         🏗️ 架构: ${{ env.ARCHITECTURE }}
@@ -292,7 +292,6 @@ jobs:
         ⏱️ 编译时间: $(date +"%Y年%m月%d日%H时%M分")
         🔧 内核版本: 6.x
         -----------------------------------------
-        🔗 项目地址: https://github.com/${{ github.repository }}
         " >> release.txt
         echo "status=success" >> ${GITHUB_OUTPUT}
 

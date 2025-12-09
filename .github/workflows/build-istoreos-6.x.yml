@@ -318,12 +318,34 @@ jobs:
         prerelease: false
         draft: false
 
-    - name: 删除运行记录
-      uses: xiaomeng9597/delete-workflow-runs@main
-      with:
-        retain_days: 30
-        keep_minimum_runs: 10
-        token: ${{ secrets.GITHUB_TOKEN }}
+    - name: 清理旧工作流运行记录（自主控制）
+      if: always()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "开始清理本工作流的旧运行记录..."
+        # 设置你想保留的最新记录条数，建议15-20
+        total_to_keep=15
+        
+        runs=$(gh run list --workflow="${{ github.workflow }}" --json databaseId,status,createdAt --jq '.[] | select(.status != "in_progress" and .status != "queued") | "\(.databaseId) \(.createdAt)"' | sort -k2)
+        
+        total_runs=$(echo "$runs" | wc -l)
+        
+        if [ $total_runs -le $total_to_keep ]; then
+          echo "当前只有 ${total_runs} 条记录，未超过保留上限 ${total_to_keep}，跳过清理。"
+          exit 0
+        fi
+        
+        runs_to_delete=$((total_runs - total_to_keep))
+        echo "找到 ${total_runs} 条记录，计划删除最旧的 ${runs_to_delete} 条。"
+        
+        delete_ids=$(echo "$runs" | head -n $runs_to_delete | awk '{print $1}')
+        
+        for run_id in $delete_ids; do
+          echo "正在删除运行记录 ID: $run_id"
+          gh run delete "$run_id" --confirm || echo "删除 $run_id 失败（可能已被其他进程删除）"
+        done
+        echo "✅ 工作流运行记录清理完成。"
 
     - name: 删除自动发布的旧固件
       uses: dev-drprasad/delete-older-releases@v0.3.3

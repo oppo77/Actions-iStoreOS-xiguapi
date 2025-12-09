@@ -290,7 +290,7 @@ jobs:
         📂 源码: ${{ env.REPO_URL }}
         🌳 分支: ${{ env.REPO_BRANCH }}
         ⏱️ 编译时间: $(date +"%Y年%m月%d日%H时%M分")
-        🔧 内核版本: 6.x
+        🔧 linux内核版本: 6.6
         -----------------------------------------
         " >> release.txt
         echo "status=success" >> ${GITHUB_OUTPUT}

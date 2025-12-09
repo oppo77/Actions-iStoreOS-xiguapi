@@ -66,7 +66,6 @@ jobs:
         sudo apt update -y
         
         echo "安装编译核心依赖（GCC工具链）..."
-        # 注意：已完全移除 clang, lld, llvm 等包
         sudo apt install -y \
           build-essential \
           flex bison g++ gawk gcc-multilib g++-multilib \
@@ -134,7 +133,6 @@ jobs:
           echo "✅ 已加载自定义 feeds.conf"
         fi
         
-        # 排除luci-app-baidupcs-web
         sed -i '/luci-app-baidupcs-web/d' ${{ env.FEEDS_CONF }}
         sed -i '/baidupcs-web/d' ${{ env.FEEDS_CONF }}
         echo "✅ 已排除luci-app-baidupcs-web相关包"
@@ -155,7 +153,6 @@ jobs:
       working-directory: ${{ env.OPENWRT_ROOT }}
       run: |
         ./scripts/feeds install -a -x luci-app-baidupcs-web
-        # 清理可能残留的baidupcs-web相关目录
         rm -rf package/feeds/*/luci-app-baidupcs-web 2>/dev/null || true
         rm -rf package/feeds/*/baidupcs-web 2>/dev/null || true
         rm -rf package/custom/luci-app-baidupcs-web 2>/dev/null || true
@@ -177,17 +174,14 @@ jobs:
       run: |
         echo "📄 加载自定义配置..."
         
-        # 1. 检查配置文件
         if [ ! -f "$CONFIG_FILE_PATH" ]; then
           echo "❌ 配置文件不存在: $CONFIG_FILE_PATH"
           exit 1
         fi
         
-        # 2. 复制配置文件
         cp "$CONFIG_FILE_PATH" "${{ env.CONFIG_FILE }}"
         echo "✅ 已复制自定义配置文件"
         
-        # 3. 验证关键配置项
         echo "🔍 验证关键配置项..."
         
         REQUIRED_CONFIGS=(
@@ -211,12 +205,9 @@ jobs:
           exit 1
         fi
         
-        # 4. 执行make defconfig
         echo "⚙️ 运行 make defconfig..."
         make defconfig >/dev/null 2>&1
         
-        
-        # 6. 确保启用CCACHE
         if ! grep -q "CONFIG_CCACHE=y" .config; then
           echo "CONFIG_CCACHE=y" >> .config
         fi
@@ -257,4 +248,87 @@ jobs:
         
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    # ... 后续的上传和发布步骤保持不变 ...
+    - name: 检查磁盘空间
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 上传 bin 文件夹
+      uses: actions/upload-artifact@v4
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin${{ env.FILE_DATE }}
+        path: ${{ env.OPENWRT_ROOT }}/bin
+
+    - name: 整理固件文件
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      working-directory: ${{ env.OPENWRT_ROOT }}
+      run: |
+        cd bin/targets/*/*
+        rm -rf packages
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "status=success" >> ${GITHUB_OUTPUT}
+
+    - name: 上传固件目录
+      uses: actions/upload-artifact@v4
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: Xiguapi-V3_Firmware${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}/*
+
+    - name: 生成发布标签
+      id: tag
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        echo "release_tag=v$(date +"%Y.%m.%d-%H.%M")-xiguapi-v3" >> ${GITHUB_OUTPUT}
+        touch release.txt
+        echo "
+        🚀 iStore OS 6.x for Xiguapi V3
+        -----------------------------------------
+        💻 设备型号: Xiguapi V3
+        🏗️ 架构: ${{ env.ARCHITECTURE }}
+        📂 源码: ${{ env.REPO_URL }}
+        🌳 分支: ${{ env.REPO_BRANCH }}
+        ⏱️ 编译时间: $(date +"%Y年%m月%d日%H时%M分")
+        🔧 内核版本: 6.x
+        -----------------------------------------
+        🌐 默认管理地址: 192.168.100.1
+        👤 用户名: root
+        🔒 密码: password
+        -----------------------------------------
+        📒 说明:
+        1. 单网口设备默认网口为LAN，旁路由模式
+        2. 需要接入主路由器后进后台查找对应IP地址访问
+        3. 双网口设备默认网口为WAN+LAN，主路由模式
+        4. Xiguapi V3专属适配固件
+        -----------------------------------------
+        🔗 项目地址: https://github.com/${{ github.repository }}
+        " >> release.txt
+        echo "status=success" >> ${GITHUB_OUTPUT}
+
+    - name: 自动发布固件到 Releases
+      uses: softprops/action-gh-release@v2
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*
+        prerelease: false
+        draft: false
+
+    - name: 删除运行记录
+      uses: xiaomeng9597/delete-workflow-runs@main
+      with:
+        retain_days: 30
+        keep_minimum_runs: 10
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 删除自动发布的旧固件
+      uses: dev-drprasad/delete-older-releases@v0.3.3
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: 20
+        delete_tag_pattern: "v.*-xiguapi-v3"
+        delete_tags: true

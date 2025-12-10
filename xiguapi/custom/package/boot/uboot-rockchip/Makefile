@@ -261,12 +261,11 @@ define U-Boot/rock-3b-rk3568
     radxa_rock-3b
 endef
 
-
-define U-Boot/generic-rk3568
+define U-Boot/xiguapi-v3-rk3568
   $(U-Boot/rk3568/Default)
-  NAME:=GENERIC RK3568
+  NAME:=xiguapi v3
   BUILD_DEVICES:= \
-    NLnet_xiguapi-v3
+    nlnet_xiguapi-v3
 endef
 
 # RK3588 boards
@@ -377,7 +376,7 @@ UBOOT_TARGETS := \
   radxa-e25-rk3568 \
   rock-3a-rk3568 \
   rock-3b-rk3568 \
-  generic-rk3568 \
+  xiguapi-v3-rk3568 \
   easepi-rk3588 \
   easepi-rk3588-lp4-1866 \
   easepi-rk3588-uart2-115200 \

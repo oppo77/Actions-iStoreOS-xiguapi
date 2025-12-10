@@ -186,7 +186,7 @@ jobs:
         
         REQUIRED_CONFIGS=(
           "CONFIG_TARGET_rockchip_armv8=y"
-          "CONFIG_TARGET_rockchip_armv8_DEVICE_nlnet_xiguapi-v3=y"
+          "CONFIG_TARGET_rockchip_armv8_DEVICE_NLnet_xiguapi-v3=y"
         )
         
         missing_configs=()

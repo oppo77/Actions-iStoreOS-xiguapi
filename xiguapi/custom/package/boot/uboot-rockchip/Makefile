@@ -265,7 +265,7 @@ define U-Boot/generic-rk3568
   $(U-Boot/rk3568/Default)
   NAME:=GENERIC RK3568
   BUILD_DEVICES:= \
-    nlnet_xiguapi-v3 \
+    NLnet_xiguapi-v3 \
 endef
 
 

@@ -1,0 +1,17 @@
+From: Your Name <your-email@example.com>
+Date: 2024-01-01 00:00:00
+Subject: [PATCH] rockchip: add rk3568-xiguapi-v3 dtb compile entry
+
+Add dtb compile entry for rk3568-xiguapi-v3 device.
+
+Signed-off-by: Your Name <your-email@example.com>
+
+--- a/arch/arm64/boot/dts/rockchip/Makefile
++++ b/arch/arm64/boot/dts/rockchip/Makefile
+@@ -113,6 +113,7 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-nanopi-r5c.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-nanopi-r5s.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-odroid-m1.dtb
++dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-xiguapi-v3.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-radxa-e25.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-roc-pc.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-rock-3a.dtb

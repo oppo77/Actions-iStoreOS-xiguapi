@@ -215,7 +215,7 @@ board_fixup_iface_name() {
 
 board_set_iface_smp_affinity() {
 	case $(board_name) in
-	nlnet,xiguapi-v3)
+	NLnet,xiguapi-v3)
 		set_iface_cpumask 2 eth0 "" 9
 		set_iface_cpumask 1 eth1 "" 6
 
@@ -442,7 +442,7 @@ board_wait_wifi() {
     [[ -f "/etc/uci-defaults/01-rk35xx-wifi" ]] || return 0
     
     case $(board_name) in
-    nlnet,xiguapi-v3|\
+    NLnet,xiguapi-v3|\
     hinlink,h88k-*|\
     hinlink,h88k|\
     hinlink,opc-h68k|\

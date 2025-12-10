@@ -178,7 +178,7 @@ TARGET_DEVICES += radxa_e25
 
 define Device/nlnet_xiguapi-v3
   DEVICE_VENDOR := NLnet
-  DEVICE_MODEL := XiGuaPi V3
+  DEVICE_MODEL := xiguapi-v3
   SOC := rk3568
   SUPPORTED_DEVICES := nlnet,xiguapi-v3
   UBOOT_DEVICE_NAME := generic-rk3568

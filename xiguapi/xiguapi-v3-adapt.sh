@@ -32,7 +32,7 @@ BOARD_NETWORK_PATH="${OPENWRT_ROOT}/target/linux/rockchip/armv8/base-files/etc/b
 BOARD_INIT_PATH="${OPENWRT_ROOT}/target/linux/rockchip/armv8/base-files/lib/board/init.sh"
 ARMV8_MK_PATH="${OPENWRT_ROOT}/target/linux/rockchip/image/armv8.mk"
 UBOOT_MAKEFILE_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/Makefile"
-UBOOT_DEFCONFIG_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/configs/xiguapi-v3-rk3568_defconfig"
+UBOOT_DEFCONFIG_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/configs/nlnet-xiguapi-v3-rk3568_defconfig"
 UBOOT_DTS_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3.dts"
 UBOOT_DTSI_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
 KERNEL_PATCH_PATH="${OPENWRT_ROOT}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch"
@@ -73,7 +73,7 @@ required_files=(
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/lib/board/init.sh:init.sh 文件"
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/image/armv8.mk:armv8.mk 文件"
     "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/Makefile:uboot-rockchip Makefile"
-    "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/configs/xiguapi-v3-rk3568_defconfig:U-Boot defconfig 文件"
+    "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/configs/nlnet-xiguapi-v3-rk3568_defconfig:U-Boot defconfig 文件"
     "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3.dts:U-Boot 设备树文件"
     "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi:U-Boot 设备树头文件"
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch:内核 patch 文件"
@@ -99,7 +99,7 @@ echo -e "${GREEN}✅ 内核 patch 文件部署完成：${KERNEL_PATCH_PATH}${NC}
 echo -e "\n${BLUE}【5/8】部署 U-Boot 相关文件...${NC}"
 # 部署 U-Boot defconfig
 mkdir -p "$(dirname "${UBOOT_DEFCONFIG_PATH}")"
-cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/configs/xiguapi-v3-rk3568_defconfig" "${UBOOT_DEFCONFIG_PATH}"
+cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/configs/nlnet-xiguapi-v3-rk3568_defconfig" "${UBOOT_DEFCONFIG_PATH}"
 echo -e "${GREEN}✅ U-Boot defconfig 部署完成${NC}"
 
 # 部署 U-Boot 设备树文件

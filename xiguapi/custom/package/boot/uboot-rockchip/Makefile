@@ -376,7 +376,7 @@ UBOOT_TARGETS := \
   radxa-e25-rk3568 \
   rock-3a-rk3568 \
   rock-3b-rk3568 \
-  nlnet_xiguapi-v3-rk3568 \
+  nlnet-xiguapi-v3-rk3568 \
   easepi-rk3588 \
   easepi-rk3588-lp4-1866 \
   easepi-rk3588-uart2-115200 \

@@ -265,7 +265,7 @@ define U-Boot/xiguapi-v3-rk3568
   $(U-Boot/rk3568/Default)
   NAME:=xiguapi v3
   BUILD_DEVICES:= \
-    nlnet_xiguapi-v3
+    NLnet_xiguapi-v3
 endef
 
 # RK3588 boards

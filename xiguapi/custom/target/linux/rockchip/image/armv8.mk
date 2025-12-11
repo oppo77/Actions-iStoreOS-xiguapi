@@ -177,9 +177,10 @@ endef
 TARGET_DEVICES += radxa_e25
 
 define Device/NLnet_xiguapi-v3
-  $(Device/rk3568)
   DEVICE_VENDOR := NLnet
   DEVICE_MODEL := xiguapi v3
+  SOC := rk3568
+  SUPPORTED_DEVICES := Lnet,xiguapi-v3
   DEVICE_PACKAGES := kmod-hwmon-pwmfan
 endef
 TARGET_DEVICES += NLnet_xiguapi-v3

@@ -37,6 +37,10 @@ UBOOT_DTS_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3
 UBOOT_DTSI_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
 KERNEL_PATCH_PATH="${OPENWRT_ROOT}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch"
 
+# 新增：WiFi自动配置脚本路径
+WIFI_AUTOSETUP_PATH="${OPENWRT_ROOT}/target/linux/rockchip/armv8/base-files/etc/uci-defaults/99-zzxgp-wifi-autosetup"
+WIFI_UNIVERSAL_SH_PATH="${OPENWRT_ROOT}/target/linux/rockchip/armv8/base-files/usr/local/bin/setup_wifi_universal.sh"
+
 # 检查文件函数
 check_file() {
     local file_path="$1"
@@ -57,6 +61,8 @@ files_to_clean=(
     "${UBOOT_DTS_PATH}"
     "${UBOOT_DTSI_PATH}"
     "${KERNEL_PATCH_PATH}"
+    "${WIFI_AUTOSETUP_PATH}"
+    "${WIFI_UNIVERSAL_SH_PATH}"
 )
 
 for file in "${files_to_clean[@]}"; do
@@ -77,6 +83,8 @@ required_files=(
     "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3.dts:U-Boot 设备树文件"
     "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi:U-Boot 设备树头文件"
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch:内核 patch 文件"
+    "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/etc/uci-defaults/99-zzxgp-wifi-autosetup:WiFi自动配置启动脚本"
+    "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/usr/local/bin/setup_wifi_universal.sh:WiFi通用配置脚本"
 )
 
 for file_info in "${required_files[@]}"; do
@@ -117,7 +125,21 @@ mkdir -p "$(dirname "${UBOOT_MAKEFILE_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/Makefile" "${UBOOT_MAKEFILE_PATH}"
 echo -e "${GREEN}✅ U-Boot Makefile 替换完成${NC}"
 
-echo -e "\n${BLUE}【6/8】替换配置文件...${NC}"
+echo -e "\n${BLUE}【6/8】部署WiFi自动配置脚本...${NC}"
+
+# 部署WiFi自动配置启动脚本
+mkdir -p "$(dirname "${WIFI_AUTOSETUP_PATH}")"
+cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/etc/uci-defaults/99-zzxgp-wifi-autosetup" "${WIFI_AUTOSETUP_PATH}"
+chmod +x "${WIFI_AUTOSETUP_PATH}"
+echo -e "${GREEN}✅ WiFi自动配置启动脚本部署完成${NC}"
+
+# 部署WiFi通用配置脚本
+mkdir -p "$(dirname "${WIFI_UNIVERSAL_SH_PATH}")"
+cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/usr/local/bin/setup_wifi_universal.sh" "${WIFI_UNIVERSAL_SH_PATH}"
+chmod +x "${WIFI_UNIVERSAL_SH_PATH}"
+echo -e "${GREEN}✅ WiFi通用配置脚本部署完成${NC}"
+
+echo -e "\n${BLUE}【7/8】替换配置文件...${NC}"
 # 替换 02_network 文件
 mkdir -p "$(dirname "${BOARD_NETWORK_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network" "${BOARD_NETWORK_PATH}"
@@ -133,7 +155,7 @@ mkdir -p "$(dirname "${ARMV8_MK_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/image/armv8.mk" "${ARMV8_MK_PATH}"
 echo -e "${GREEN}✅ armv8.mk 文件替换完成${NC}"
 
-echo -e "\n${BLUE}【7/8】验证部署结果...${NC}"
+echo -e "\n${BLUE}【8/8】验证部署结果...${NC}"
 verify_pass=0
 
 show_file_context() {
@@ -187,6 +209,8 @@ all_files=(
     "${UBOOT_DTS_PATH}"
     "${UBOOT_DTSI_PATH}"
     "${KERNEL_PATCH_PATH}"
+    "${WIFI_AUTOSETUP_PATH}"
+    "${WIFI_UNIVERSAL_SH_PATH}"
 )
 
 for file_path in "${all_files[@]}"; do
@@ -213,6 +237,8 @@ key_files_to_check=(
     "${UBOOT_MAKEFILE_PATH}:xiguapi-v3:U-Boot Makefile"
     "${UBOOT_DEFCONFIG_PATH}:CONFIG_:U-Boot defconfig"
     "${KERNEL_PATCH_PATH}:xiguapi-v3:内核 patch 文件"
+    "${WIFI_AUTOSETUP_PATH}:zzxgp:WiFi自动配置启动脚本"
+    "${WIFI_UNIVERSAL_SH_PATH}:setup_wifi:WiFi通用配置脚本"
 )
 
 for file_info in "${key_files_to_check[@]}"; do
@@ -222,7 +248,7 @@ for file_info in "${key_files_to_check[@]}"; do
     show_file_context "${file_path}" "${search_pattern}" "${desc}"
 done
 
-echo -e "\n${BLUE}【8/8】部署完成检查...${NC}"
+echo -e "\n${BLUE}【9/8】部署完成检查...${NC}"
 if [ ${verify_pass} -eq 0 ]; then
     echo -e "${GREEN}🎉 Xiguapi V3 设备适配成功！${NC}"
     echo -e "${BLUE}==========================================${NC}"
@@ -238,9 +264,11 @@ if [ ${verify_pass} -eq 0 ]; then
     echo -e "  ${GREEN}4. U-Boot 设备树：${UBOOT_DTS_PATH}${NC}"
     echo -e "  ${GREEN}5. U-Boot 设备树头文件：${UBOOT_DTSI_PATH}${NC}"
     echo -e "  ${GREEN}6. U-Boot Makefile：${UBOOT_MAKEFILE_PATH}${NC}"
-    echo -e "  ${GREEN}7. 02_network：${BOARD_NETWORK_PATH}${NC}"
-    echo -e "  ${GREEN}8. init.sh：${BOARD_INIT_PATH}${NC}"
-    echo -e "  ${GREEN}9. armv8.mk：${ARMV8_MK_PATH}${NC}"
+    echo -e "  ${GREEN}7. WiFi自动配置启动脚本：${WIFI_AUTOSETUP_PATH}${NC}"
+    echo -e "  ${GREEN}8. WiFi通用配置脚本：${WIFI_UNIVERSAL_SH_PATH}${NC}"
+    echo -e "  ${GREEN}9. 02_network：${BOARD_NETWORK_PATH}${NC}"
+    echo -e "  ${GREEN}10. init.sh：${BOARD_INIT_PATH}${NC}"
+    echo -e "  ${GREEN}11. armv8.mk：${ARMV8_MK_PATH}${NC}"
     echo -e "${BLUE}==========================================${NC}"
     
     echo -e "\n${BLUE}💡 后续步骤：${NC}"
@@ -249,6 +277,12 @@ if [ ${verify_pass} -eq 0 ]; then
     echo -e "  3. 选择 Subtarget: RK3568"
     echo -e "  4. 选择 Target Profile: Xiguapi V3"
     echo -e "  5. 保存配置后执行：make -j$(nproc)"
+    
+    echo -e "\n${GREEN}✨ WiFi自动配置功能说明：${NC}"
+    echo -e "  • 设备首次启动时将自动运行 ${WIFI_AUTOSETUP_PATH}"
+    echo -e "  • 该脚本会调用 ${WIFI_UNIVERSAL_SH_PATH} 动态配置WiFi"
+    echo -e "  • 支持自动识别MT7916等网卡，创建双频/三频热点"
+    echo -e "  • 热点SSID：zzXGP，密码：xgpxgpxgp"
     
     exit 0
 else
@@ -262,7 +296,8 @@ else
     echo -e "\n${YELLOW}📁 自定义目录结构：${NC}"
     find "${CUSTOM_CONFIG_DIR}" -type f \
         \( -name "*.dts" -o -name "*.mk" -o -name "02_network" -o -name "init.sh" \
-        -o -name "Makefile" -o -name "*.defconfig" -o -name "*.patch" -o -name "*.dtsi" \) | sort
+        -o -name "Makefile" -o -name "*.defconfig" -o -name "*.patch" -o -name "*.dtsi" \
+        -o -name "*zzxgp*" -o -name "*setup_wifi*" \) | sort
     
     echo -e "\n${YELLOW}📁 目标部署路径：${NC}"
     for dir in \
@@ -270,7 +305,9 @@ else
         "$(dirname "${KERNEL_PATCH_PATH}")" \
         "$(dirname "${UBOOT_DEFCONFIG_PATH}")" \
         "$(dirname "${UBOOT_DTS_PATH}")" \
-        "$(dirname "${BOARD_NETWORK_PATH}")"; do
+        "$(dirname "${BOARD_NETWORK_PATH}")" \
+        "$(dirname "${WIFI_AUTOSETUP_PATH}")" \
+        "$(dirname "${WIFI_UNIVERSAL_SH_PATH}")"; do
         if [ -d "${dir}" ]; then
             echo -e "  ${GREEN}✅ ${dir}${NC}"
         else

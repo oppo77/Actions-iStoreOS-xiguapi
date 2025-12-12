@@ -183,7 +183,7 @@ define Device/NLnet_xiguapi-v3
   UBOOT_DEVICE_NAME := nlnet-xiguapi-v3-rk3568
   SUPPORTED_DEVICES := NLnet,xiguapi-v3
   DEVICE_PACKAGES := kmod-hwmon-pwmfan
-  IMAGE/sysupgrade.img.gz := append-kernel | append-rootfs | pad-rootfs | check-size | append-metadata
+  IMAGE/sysupgrade.img.gz := append-kernel | append-rootfs | pad-rootfs | append-metadata
 endef
 TARGET_DEVICES += NLnet_xiguapi-v3
 

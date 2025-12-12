@@ -1,0 +1,31 @@
+#!/bin/sh
+# /etc/uci-defaults/99-zzxgp-wifi-autosetup
+# 首次启动WiFi自动配置入口脚本
+# OpenWrt UCI-Defaults 机制：成功执行（返回0）后自动删除此脚本
+
+LOGFILE="/tmp/uci-defaults-wifi-setup.log"
+
+{
+echo "=========================================="
+echo "$(date): 开始执行WiFi自动配置 (99-zzxgp-wifi-autosetup)"
+echo "=========================================="
+
+# 检查核心脚本是否存在
+if [ ! -x "/usr/local/bin/setup_wifi_universal.sh" ]; then
+    echo "错误：核心脚本 /usr/local/bin/setup_wifi_universal.sh 不存在或不可执行。"
+    exit 1 # 返回非0，此脚本将被保留以供检查
+fi
+
+# 执行核心配置脚本
+if /usr/local/bin/setup_wifi_universal.sh; then
+    echo "$(date): WiFi自动配置成功完成。"
+    # 重要：返回0表示成功，脚本将被系统从 /etc/uci-defaults/ 目录删除
+    exit 0
+else
+    CONFIG_EXIT_CODE=$?
+    echo "$(date): WiFi自动配置失败，核心脚本退出代码: $CONFIG_EXIT_CODE"
+    echo "请检查日志文件: /tmp/wifi_setup.log 和本文件以获取详细信息。"
+    echo "此脚本将被保留，下次启动时会再次尝试执行。"
+    exit $CONFIG_EXIT_CODE # 返回非0，脚本保留
+fi
+} >> "$LOGFILE" 2>&1

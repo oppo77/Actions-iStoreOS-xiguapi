@@ -1,152 +1,110 @@
 #!/bin/sh
 # /usr/local/bin/setup_wifi_universal.sh
-# 通用WiFi网卡自动识别与配置脚本
-# 功能：自动识别系统中的phy无线接口，根据其能力配置双频/三频统一热点
+# 基于已知硬件路径的预设WiFi配置脚本（针对 xiguapi-v3 + MT7916）
+# 此版本放弃复杂的动态探测，采用已验证的稳定配置。
 
-LOG_FILE="/tmp/wifi_setup.log"
-exec 1>"$LOG_FILE" 2>&1
+LOG_FILE="/tmp/wifi_preset_setup.log"
+exec > "$LOG_FILE" 2>&1
 set -x
 
-echo "=== $(date) 开始执行通用WiFi自动配置 ==="
+echo "=== $(date) 开始应用预设WiFi配置 ==="
 
-# ---------- 用户可修改变量 ----------
+# ========== 预设配置参数 (可根据需要修改) ==========
 SSID="zzXGP"
-ENCRYPTION="psk2"
-KEY="xgpxgpxgp"
-COUNTRY="CN" # 国家码，影响可用信道
-# ------------------------------------
+ENCRYPTION="psk2+ccmp"
+WIFI_KEY="xgpxgpxgp"
+COUNTRY="CN"        # 国家码，CN为中国
+CHAN_2G="6"         # 2.4GHz推荐信道：1, 6, 11
+CHAN_5G="40"        # 5GHz信道（CN允许：36,40,44,48,149,153,157,161,165）
+# =================================================
 
-# 1. 安全地清理旧的、由脚本管理的无线设备配置
-# 只删除类型为'mac80211'的radio节（现代USB/PCIe网卡），避免误删其他驱动
+# ========== 核心：硬件路径 (来自你当前运行的系统，已验证可用) ==========
+# 这些路径直接从你设备的 `uci show wireless` 输出中提取
+RADIO0_PATH="3c0400000.pcie/pci0001:10/0001:10:00.0/0001:11:00.0"
+RADIO1_PATH="3c0400000.pcie/pci0001:10/0001:10:00.0/0001:11:00.0+1"
+# ======================================================================
+
+echo "使用预设路径:"
+echo "  radio0.path = $RADIO0_PATH"
+echo "  radio1.path = $RADIO1_PATH"
+
+# 1. 清理旧的动态配置（与之前逻辑一致，安全删除）
 for radio_section in $(uci show wireless 2>/dev/null | grep -o "wireless\.radio[0-9]*" | sort -u); do
     if uci get "${radio_section}.type" 2>/dev/null | grep -q "mac80211"; then
         uci delete "$radio_section"
         echo "已删除旧配置节: $radio_section"
     fi
 done
-# 清理可能残留的默认接口配置
+# 清理默认接口节
 while uci delete wireless.@wifi-iface[0] 2>/dev/null; do :; done
 
-# 2. 获取所有物理接口并遍历配置
-phy_list=$(find /sys/class/ieee80211/ -name "phy*" 2>/dev/null | sort | sed 's#.*/##')
-echo "系统检测到的物理接口: $phy_list"
+# 2. 应用预设配置：2.4GHz (radio0)
+echo "正在配置 radio0 (2.4GHz)..."
+uci set wireless.radio0=wifi-device
+uci set wireless.radio0.type='mac80211'
+uci set wireless.radio0.path="$RADIO0_PATH"
+uci set wireless.radio0.band='2g'
+uci set wireless.radio0.channel="$CHAN_2G"
+uci set wireless.radio0.htmode='HE20'      # MT7916 2.4GHz支持HE模式
+uci set wireless.radio0.country="$COUNTRY"
+uci set wireless.radio0.disabled='0'
+uci set wireless.radio0.cell_density='0'   # 可选，改善兼容性
 
-if [ -z "$phy_list" ]; then
-    echo "错误：未在 /sys/class/ieee80211/ 下找到任何无线物理接口。"
-    echo "可能原因：无线驱动未加载或内核不支持。"
+uci set wireless.default_radio0=wifi-iface
+uci set wireless.default_radio0.device='radio0'
+uci set wireless.default_radio0.mode='ap'
+uci set wireless.default_radio0.network='lan'
+uci set wireless.default_radio0.ssid="$SSID"
+uci set wireless.default_radio0.encryption="$ENCRYPTION"
+uci set wireless.default_radio0.key="$WIFI_KEY"
+uci set wireless.default_radio0.disabled='0'
+
+# 3. 应用预设配置：5GHz (radio1)
+echo "正在配置 radio1 (5GHz)..."
+uci set wireless.radio1=wifi-device
+uci set wireless.radio1.type='mac80211'
+uci set wireless.radio1.path="$RADIO1_PATH"
+uci set wireless.radio1.band='5g'
+uci set wireless.radio1.channel="$CHAN_5G"
+uci set wireless.radio1.htmode='HE80'      # MT7916 5GHz支持HE80
+uci set wireless.radio1.country="$COUNTRY"
+uci set wireless.radio1.disabled='0'
+
+uci set wireless.default_radio1=wifi-iface
+uci set wireless.default_radio1.device='radio1'
+uci set wireless.default_radio1.mode='ap'
+uci set wireless.default_radio1.network='lan'
+uci set wireless.default_radio1.ssid="$SSID" # 相同SSID实现双频漫游
+uci set wireless.default_radio1.encryption="$ENCRYPTION"
+uci set wireless.default_radio1.key="$WIFI_KEY"
+uci set wireless.default_radio1.disabled='0'
+
+# 4. 提交配置
+echo "提交UCI配置..."
+if uci commit wireless; then
+    echo "UCI配置提交成功"
+else
+    echo "错误：提交UCI配置失败"
     exit 1
 fi
 
-radio_idx=0
-for phy in $phy_list; do
-    echo "--- 正在处理接口: $phy ---"
-    phy_info=$(iw phy "$phy" info 2>/dev/null)
-    if [ -z "$phy_info" ]; then
-        echo "  警告：无法获取 $phy 的详细信息，跳过。"
-        continue
-    fi
-
-    # 3. 核心：解析支持的频段 (基于标准的频率范围)
-    band_2g=""; band_5g=""; band_6g=""
-    if echo "$phy_info" | grep -q "24[0-9][0-9] MHz"; then
-        band_2g="1"
-        echo "  $phy 支持 2.4GHz 频段"
-    fi
-    if echo "$phy_info" | grep -q "5[0-9][0-9][0-9] MHz"; then
-        band_5g="1"
-        echo "  $phy 支持 5GHz 频段"
-    fi
-    if echo "$phy_info" | grep -q "6[0-9][0-9][0-9] MHz"; then
-        band_6g="1"
-        echo "  $phy 支持 6GHz 频段"
-    fi
-
-    # 确定此phy的主要频段（优先级：6G > 5G > 2G）
-    band=""
-    hwmode=""
-    htmode=""
-    if [ -n "$band_6g" ]; then
-        band="6g"
-        hwmode="11a"
-        # 检查HE能力以设置Wi-Fi 6E/7模式
-        if echo "$phy_info" | grep -qi "HE PHY Capabilities"; then
-            htmode="HE80" # 可根据硬件调整为 HE160
-        else
-            htmode="VHT80" # 回退模式
-        fi
-    elif [ -n "$band_5g" ]; then
-        band="5g"
-        hwmode="11a"
-        if echo "$phy_info" | grep -qi "HE PHY Capabilities"; then
-            htmode="HE80"
-        elif echo "$phy_info" | grep -qi "VHT Capabilities"; then
-            htmode="VHT80"
-        else
-            htmode="HT20"
-        fi
-    elif [ -n "$band_2g" ]; then
-        band="2g"
-        hwmode="11g"
-        if echo "$phy_info" | grep -qi "HE PHY Capabilities"; then
-            htmode="HE20" # 2.4GHz的Wi-Fi 6模式
-        else
-            htmode="HT20"
-        fi
-    else
-        echo "  警告：$phy 未识别到支持的频段，跳过配置。"
-        continue
-    fi
-
-    # 4. 创建UCI配置
-    radio_name="radio${radio_idx}"
-    iface_name="default_${radio_name}"
-
-    echo "  > 正在创建配置: UCI设备[$radio_name], 频段[$band], 模式[$htmode]"
-
-    # 创建设备节
-    uci set wireless."$radio_name"='wifi-device'
-    uci set wireless."$radio_name".type='mac80211'
-    uci set wireless."$radio_name".phy="$phy"
-    uci set wireless."$radio_name".hwmode="$hwmode"
-    uci set wireless."$radio_name".band="$band"
-    uci set wireless."$radio_name".channel='auto'
-    uci set wireless."$radio_name".htmode="$htmode"
-    uci set wireless."$radio_name".disabled='0'
-    uci set wireless."$radio_name".country="$COUNTRY"
-
-    # 创建接入点接口节
-    uci add wireless wifi-iface
-    uci rename wireless.@wifi-iface[-1]="$iface_name"
-    uci set wireless."$iface_name".device="$radio_name"
-    uci set wireless."$iface_name".mode='ap'
-    uci set wireless."$iface_name".network='lan'
-    uci set wireless."$iface_name".ssid="$SSID"
-    uci set wireless."$iface_name".encryption="$ENCRYPTION"
-    uci set wireless."$iface_name".key="$KEY"
-    uci set wireless."$iface_name".disabled='0'
-
-    radio_idx=$((radio_idx + 1))
-done
-
-# 5. 提交配置并重启无线服务
-if [ $radio_idx -eq 0 ]; then
-    echo "错误：未能为任何物理接口生成有效配置。"
-    exit 1
-fi
-
-echo "提交UCI配置，共配置了 $radio_idx 个无线接口。"
-uci commit wireless
-
-# 重启无线服务（采用稳健的方式）
-echo "重新启动无线服务..."
-wifi down 2>/dev/null
+# 5. 重启无线服务
+echo "重启无线服务..."
+wifi down >/dev/null 2>&1
 sleep 2
-wifi up 2>/dev/null
+wifi up >/dev/null 2>&1
+sleep 2 # 给无线接口启动留点时间
 
-# 6. 最终状态检查
-echo "=== $(date) 配置执行完毕 ==="
-echo "当前无线配置摘要:"
-uci show wireless | grep -E "\.(phy|band|ssid|disabled)=" | sort
-
-# 返回成功
-exit 0
+# 6. 简易验证
+echo "配置完成，检查接口状态:"
+if ip link show wlan0 >/dev/null 2>&1 && ip link show wlan1 >/dev/null 2>&1; then
+    echo "成功: wlan0 和 wlan1 接口已启动。"
+    echo "热点 SSID: $SSID"
+    echo "国家码: $COUNTRY"
+    echo "信道: 2.4GHz-$CHAN_2G, 5GHz-$CHAN_5G"
+    exit 0
+else
+    echo "警告: 部分无线接口可能未启动，请检查日志。"
+    # 不返回错误，因为配置可能部分生效
+    exit 0
+fi

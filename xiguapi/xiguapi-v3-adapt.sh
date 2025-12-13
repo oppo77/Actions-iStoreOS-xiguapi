@@ -37,9 +37,9 @@ UBOOT_DTS_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3
 UBOOT_DTSI_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
 KERNEL_PATCH_PATH="${OPENWRT_ROOT}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch"
 
-# 新增：WiFi自动配置脚本路径
-WIFI_AUTOSETUP_PATH="${OPENWRT_ROOT}/target/linux/rockchip/armv8/base-files/etc/uci-defaults/99-zzxgp-wifi-autosetup"
-WIFI_UNIVERSAL_SH_PATH="${OPENWRT_ROOT}/target/linux/rockchip/armv8/base-files/usr/local/bin/setup_wifi_universal.sh"
+# 新增：rc.local 和 wireless 配置文件路径
+RC_LOCAL_PATH="${OPENWRT_ROOT}/files/etc/rc.local"
+WIRELESS_PATH="${OPENWRT_ROOT}/files/etc/config/wireless"
 
 # 检查文件函数
 check_file() {
@@ -61,8 +61,6 @@ files_to_clean=(
     "${UBOOT_DTS_PATH}"
     "${UBOOT_DTSI_PATH}"
     "${KERNEL_PATCH_PATH}"
-    "${WIFI_AUTOSETUP_PATH}"
-    "${WIFI_UNIVERSAL_SH_PATH}"
 )
 
 for file in "${files_to_clean[@]}"; do
@@ -83,8 +81,8 @@ required_files=(
     "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3.dts:U-Boot 设备树文件"
     "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi:U-Boot 设备树头文件"
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch:内核 patch 文件"
-    "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/etc/uci-defaults/99-zzxgp-wifi-autosetup:WiFi自动配置启动脚本"
-    "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/usr/local/bin/setup_wifi_universal.sh:WiFi通用配置脚本"
+    "${CUSTOM_CONFIG_DIR}/files/etc/rc.local:rc.local 启动脚本"
+    "${CUSTOM_CONFIG_DIR}/files/etc/config/wireless:wireless 配置文件"
 )
 
 for file_info in "${required_files[@]}"; do
@@ -125,19 +123,19 @@ mkdir -p "$(dirname "${UBOOT_MAKEFILE_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/Makefile" "${UBOOT_MAKEFILE_PATH}"
 echo -e "${GREEN}✅ U-Boot Makefile 替换完成${NC}"
 
-echo -e "\n${BLUE}【6/8】部署WiFi自动配置脚本...${NC}"
+echo -e "\n${BLUE}【6/8】部署 rc.local 和 wireless 配置文件...${NC}"
 
-# 部署WiFi自动配置启动脚本
-mkdir -p "$(dirname "${WIFI_AUTOSETUP_PATH}")"
-cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/etc/uci-defaults/99-zzxgp-wifi-autosetup" "${WIFI_AUTOSETUP_PATH}"
-chmod +x "${WIFI_AUTOSETUP_PATH}"
-echo -e "${GREEN}✅ WiFi自动配置启动脚本部署完成${NC}"
+# 部署 rc.local 文件
+mkdir -p "$(dirname "${RC_LOCAL_PATH}")"
+cp -f "${CUSTOM_CONFIG_DIR}/files/etc/rc.local" "${RC_LOCAL_PATH}"
+chmod 755 "${RC_LOCAL_PATH}"
+echo -e "${GREEN}✅ rc.local 文件部署完成（权限：755）${NC}"
 
-# 部署WiFi通用配置脚本
-mkdir -p "$(dirname "${WIFI_UNIVERSAL_SH_PATH}")"
-cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/usr/local/bin/setup_wifi_universal.sh" "${WIFI_UNIVERSAL_SH_PATH}"
-chmod +x "${WIFI_UNIVERSAL_SH_PATH}"
-echo -e "${GREEN}✅ WiFi通用配置脚本部署完成${NC}"
+# 部署 wireless 配置文件
+mkdir -p "$(dirname "${WIRELESS_PATH}")"
+cp -f "${CUSTOM_CONFIG_DIR}/files/etc/config/wireless" "${WIRELESS_PATH}"
+chmod 644 "${WIRELESS_PATH}"
+echo -e "${GREEN}✅ wireless 配置文件部署完成（权限：644）${NC}"
 
 echo -e "\n${BLUE}【7/8】替换配置文件...${NC}"
 # 替换 02_network 文件
@@ -209,8 +207,8 @@ all_files=(
     "${UBOOT_DTS_PATH}"
     "${UBOOT_DTSI_PATH}"
     "${KERNEL_PATCH_PATH}"
-    "${WIFI_AUTOSETUP_PATH}"
-    "${WIFI_UNIVERSAL_SH_PATH}"
+    "${RC_LOCAL_PATH}"
+    "${WIRELESS_PATH}"
 )
 
 for file_path in "${all_files[@]}"; do
@@ -228,6 +226,25 @@ for file_path in "${all_files[@]}"; do
     fi
 done
 
+# 检查文件权限
+echo -e "\n${BLUE}📋 文件权限检查：${NC}"
+rc_local_perms=$(stat -c "%A" "${RC_LOCAL_PATH}" 2>/dev/null || echo "文件不存在")
+wireless_perms=$(stat -c "%A" "${WIRELESS_PATH}" 2>/dev/null || echo "文件不存在")
+
+if [ "$rc_local_perms" = "-rwxr-xr-x" ] || [ "$rc_local_perms" = "-rwxr-xr-x" ]; then
+    echo -e "  ${GREEN}✅ rc.local 权限正确: ${rc_local_perms}${NC}"
+else
+    echo -e "  ${RED}❌ rc.local 权限错误: ${rc_local_perms} (应为 -rwxr-xr-x)${NC}"
+    verify_pass=1
+fi
+
+if [ "$wireless_perms" = "-rw-r--r--" ]; then
+    echo -e "  ${GREEN}✅ wireless 权限正确: ${wireless_perms}${NC}"
+else
+    echo -e "  ${RED}❌ wireless 权限错误: ${wireless_perms} (应为 -rw-r--r--)${NC}"
+    verify_pass=1
+fi
+
 # 关键文件内容验证
 echo -e "\n${BLUE}📋 关键文件内容验证：${NC}"
 key_files_to_check=(
@@ -237,8 +254,8 @@ key_files_to_check=(
     "${UBOOT_MAKEFILE_PATH}:xiguapi-v3:U-Boot Makefile"
     "${UBOOT_DEFCONFIG_PATH}:CONFIG_:U-Boot defconfig"
     "${KERNEL_PATCH_PATH}:xiguapi-v3:内核 patch 文件"
-    "${WIFI_AUTOSETUP_PATH}:zzxgp:WiFi自动配置启动脚本"
-    "${WIFI_UNIVERSAL_SH_PATH}:setup_wifi:WiFi通用配置脚本"
+    "${RC_LOCAL_PATH}:#!/bin/sh:rc.local 启动脚本"
+    "${WIRELESS_PATH}:config wifi-device:wireless 配置文件"
 )
 
 for file_info in "${key_files_to_check[@]}"; do
@@ -256,6 +273,7 @@ if [ ${verify_pass} -eq 0 ]; then
     echo -e "${GREEN}✅ 所有配置文件已替换${NC}"
     echo -e "${GREEN}✅ 所有文件格式已验证${NC}"
     echo -e "${GREEN}✅ 所有文件大小正常${NC}"
+    echo -e "${GREEN}✅ 文件权限设置正确${NC}"
     echo -e "${BLUE}==========================================${NC}"
     echo -e "${BLUE}📋 已部署的文件列表：${NC}"
     echo -e "  ${GREEN}1. 内核设备树：${DTS_ORIGINAL_PATH}${NC}"
@@ -264,8 +282,8 @@ if [ ${verify_pass} -eq 0 ]; then
     echo -e "  ${GREEN}4. U-Boot 设备树：${UBOOT_DTS_PATH}${NC}"
     echo -e "  ${GREEN}5. U-Boot 设备树头文件：${UBOOT_DTSI_PATH}${NC}"
     echo -e "  ${GREEN}6. U-Boot Makefile：${UBOOT_MAKEFILE_PATH}${NC}"
-    echo -e "  ${GREEN}7. WiFi自动配置启动脚本：${WIFI_AUTOSETUP_PATH}${NC}"
-    echo -e "  ${GREEN}8. WiFi通用配置脚本：${WIFI_UNIVERSAL_SH_PATH}${NC}"
+    echo -e "  ${GREEN}7. rc.local 启动脚本：${RC_LOCAL_PATH} (权限：755)${NC}"
+    echo -e "  ${GREEN}8. wireless 配置文件：${WIRELESS_PATH} (权限：644)${NC}"
     echo -e "  ${GREEN}9. 02_network：${BOARD_NETWORK_PATH}${NC}"
     echo -e "  ${GREEN}10. init.sh：${BOARD_INIT_PATH}${NC}"
     echo -e "  ${GREEN}11. armv8.mk：${ARMV8_MK_PATH}${NC}"
@@ -278,18 +296,17 @@ if [ ${verify_pass} -eq 0 ]; then
     echo -e "  4. 选择 Target Profile: Xiguapi V3"
     echo -e "  5. 保存配置后执行：make -j$(nproc)"
     
-    echo -e "\n${GREEN}✨ WiFi自动配置功能说明：${NC}"
-    echo -e "  • 设备首次启动时将自动运行 ${WIFI_AUTOSETUP_PATH}"
-    echo -e "  • 该脚本会调用 ${WIFI_UNIVERSAL_SH_PATH} 动态配置WiFi"
-    echo -e "  • 支持自动识别MT7916等网卡，创建双频/三频热点"
-    echo -e "  • 热点SSID：zzXGP，密码：xgpxgpxgp"
+    echo -e "\n${GREEN}✨ 配置文件说明：${NC}"
+    echo -e "  • rc.local：系统启动脚本，权限设置为 755"
+    echo -e "  • wireless：WiFi配置文件，权限设置为 644"
+    echo -e "  • 这两个文件将直接复制到固件的 /etc 目录"
     
     exit 0
 else
     echo -e "${RED}❌ 设备适配失败！${NC}"
     echo -e "\n${YELLOW}🔧 调试建议：${NC}"
     echo -e "  1. 检查自定义文件中的关键词是否正确"
-    echo -e "  2. 检查文件权限：ls -la \${CUSTOM_CONFIG_DIR}/"
+    echo -e "  2. 检查文件权限：ls -la \${CUSTOM_CONFIG_DIR}/files/"
     echo -e "  3. 确保自定义文件不为空"
     echo -e "  4. 检查路径是否正确：自定义文件应放在正确的子目录中"
     
@@ -297,7 +314,7 @@ else
     find "${CUSTOM_CONFIG_DIR}" -type f \
         \( -name "*.dts" -o -name "*.mk" -o -name "02_network" -o -name "init.sh" \
         -o -name "Makefile" -o -name "*.defconfig" -o -name "*.patch" -o -name "*.dtsi" \
-        -o -name "*zzxgp*" -o -name "*setup_wifi*" \) | sort
+        -o -name "rc.local" -o -name "wireless" \) | sort
     
     echo -e "\n${YELLOW}📁 目标部署路径：${NC}"
     for dir in \
@@ -306,8 +323,8 @@ else
         "$(dirname "${UBOOT_DEFCONFIG_PATH}")" \
         "$(dirname "${UBOOT_DTS_PATH}")" \
         "$(dirname "${BOARD_NETWORK_PATH}")" \
-        "$(dirname "${WIFI_AUTOSETUP_PATH}")" \
-        "$(dirname "${WIFI_UNIVERSAL_SH_PATH}")"; do
+        "$(dirname "${RC_LOCAL_PATH}")" \
+        "$(dirname "${WIRELESS_PATH}")"; do
         if [ -d "${dir}" ]; then
             echo -e "  ${GREEN}✅ ${dir}${NC}"
         else

@@ -1,7 +1,7 @@
 ## 适用于 **西瓜皮V3** 设备的定制iStoreOS固件。
 
 #### 西瓜皮官方🐧群318407767
-> 🈶bug或者需要新增功能欢迎提交
+> 此项目未半成品未适配完成。🈶bug或者需要新增功能欢迎提交
 
 [![iStore 使用文档](https://img.shields.io/badge/使用文档-iStore%20OS-brightgreen?style=flat-square)](https://doc.linkease.com/zh/guide/istoreos)
 [![最新固件下载](https://img.shields.io/github/v/release/xiaomeng9597/Actions-iStoreOS-RK35XX?style=flat-square&label=最新固件下载)](../../releases/latest)
@@ -56,8 +56,8 @@
 - 基础适配
 
 ### 🚀 计划中
+- 添加wifi启动脚本
 - 精简配置
-- 优化启动脚本
 - 小屏幕适配
 
 ---

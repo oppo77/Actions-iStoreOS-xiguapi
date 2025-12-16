@@ -4,7 +4,8 @@ on:
   repository_dispatch:
   workflow_dispatch:
   schedule:
-    - cron: 55 15 * * *
+    # 每周五 15:55 UTC 运行（北京时间周五 23:55）
+    - cron: 55 15 * * 5
 
 jobs:
   sync:
@@ -52,10 +53,11 @@ jobs:
            echo "✅ 已强制关闭所有 LLVM/Clang 相关编译选项。"
            # ================================================
 
-           # ========== 原有：删除旧设备配置 ==========
-           sed -i '/^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE/d' ./armv8/.config
+           # ========== 修改：删除旧设备配置但保留 NLnet_xiguapi-v3 ==========
+           # 使用 sed 删除不包含 NLnet_xiguapi-v3 的 CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE 行
+           sed -i '/^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE.*NLnet_xiguapi-v3/! { /^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE/d; }' ./armv8/.config
            sed -i '/^CONFIG_TARGET_MULTI_PROFILE=y$/d' ./armv8/.config
-           # =====================================
+           # ================================================================
 
            # 原有：清除重复配置项 + 过滤空行
            configdata2=$(cat ./armv8/.config)

@@ -45,7 +45,7 @@ check_file() {
     fi
 }
 
-echo -e "\n${BLUE}【1/7】清理残留文件...${NC}"
+echo -e "\n${BLUE}【1/6】清理残留文件...${NC}"
 cd "${OPENWRT_ROOT}"
 
 # 清理旧文件
@@ -64,7 +64,7 @@ for file in "${files_to_clean[@]}"; do
     fi
 done
 
-echo -e "\n${BLUE}【2/7】检查自定义文件...${NC}"
+echo -e "\n${BLUE}【2/6】检查自定义文件...${NC}"
 required_files=(
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/files/arch/arm64/boot/dts/rockchip/rk3568-xiguapi-v3.dts:内核设备树文件"
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/image/armv8.mk:armv8.mk 文件"
@@ -82,17 +82,16 @@ for file_info in "${required_files[@]}"; do
 done
 echo -e "${GREEN}✅ 所有自定义文件检查通过${NC}"
 
-echo -e "\n${BLUE}【3/7】部署内核设备树...${NC}"
+echo -e "\n${BLUE}【3/6】部署内核设备树和patch...${NC}"
 mkdir -p "$(dirname "${DTS_ORIGINAL_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/files/arch/arm64/boot/dts/rockchip/rk3568-xiguapi-v3.dts" "${DTS_ORIGINAL_PATH}"
-echo -e "${GREEN}✅ 内核设备树文件部署完成：${DTS_ORIGINAL_PATH}${NC}"
+echo -e "${GREEN}✅ 内核设备树文件部署完成${NC}"
 
-echo -e "\n${BLUE}【4/7】部署内核 patch 文件...${NC}"
 mkdir -p "$(dirname "${KERNEL_PATCH_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch" "${KERNEL_PATCH_PATH}"
-echo -e "${GREEN}✅ 内核 patch 文件部署完成：${KERNEL_PATCH_PATH}${NC}"
+echo -e "${GREEN}✅ 内核 patch 文件部署完成${NC}"
 
-echo -e "\n${BLUE}【5/7】部署 U-Boot 相关文件...${NC}"
+echo -e "\n${BLUE}【4/6】部署 U-Boot 相关文件...${NC}"
 # 部署 U-Boot defconfig
 mkdir -p "$(dirname "${UBOOT_DEFCONFIG_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/configs/nlnet-xiguapi-v3-rk3568_defconfig" "${UBOOT_DEFCONFIG_PATH}"
@@ -113,13 +112,12 @@ mkdir -p "$(dirname "${UBOOT_MAKEFILE_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/Makefile" "${UBOOT_MAKEFILE_PATH}"
 echo -e "${GREEN}✅ U-Boot Makefile 替换完成${NC}"
 
-echo -e "\n${BLUE}【6/7】替换 armv8.mk 文件...${NC}"
-# 替换 armv8.mk 文件
+echo -e "\n${BLUE}【5/6】替换 armv8.mk 文件...${NC}"
 mkdir -p "$(dirname "${ARMV8_MK_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/image/armv8.mk" "${ARMV8_MK_PATH}"
 echo -e "${GREEN}✅ armv8.mk 文件替换完成${NC}"
 
-echo -e "\n${BLUE}【7/7】验证部署结果...${NC}"
+echo -e "\n${BLUE}【6/6】验证部署结果...${NC}"
 verify_pass=0
 
 show_file_context() {
@@ -205,7 +203,7 @@ for file_info in "${key_files_to_check[@]}"; do
     show_file_context "${file_path}" "${search_pattern}" "${desc}"
 done
 
-echo -e "\n${BLUE}【8/7】部署完成检查...${NC}"
+echo -e "\n${BLUE}部署完成检查...${NC}"
 if [ ${verify_pass} -eq 0 ]; then
     echo -e "${GREEN}🎉 Xiguapi V3 设备适配成功！${NC}"
     echo -e "${BLUE}==========================================${NC}"
@@ -224,6 +222,7 @@ if [ ${verify_pass} -eq 0 ]; then
     echo -e "  ${GREEN}7. armv8.mk：${ARMV8_MK_PATH}${NC}"
     echo -e "${BLUE}==========================================${NC}"
     
+
     
     exit 0
 else

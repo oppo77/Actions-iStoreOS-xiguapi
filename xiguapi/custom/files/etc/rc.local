@@ -1,9 +1,0 @@
-#!/bin/sh /etc/rc.common
-
-START=99
-
-start() {
-    # 确保 WiFi 在网络初始化完成后启用（iStoreOS 启动顺序兼容）
-    sleep 2
-    wifi up 2>/dev/null || true
-}

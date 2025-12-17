@@ -34,6 +34,7 @@ UBOOT_DEFCONFIG_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/configs/nl
 UBOOT_DTS_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3.dts"
 UBOOT_DTSI_PATH="${OPENWRT_ROOT}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi"
 KERNEL_PATCH_PATH="${OPENWRT_ROOT}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch"
+NETWORK_CONFIG_PATH="${OPENWRT_ROOT}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network"
 
 # 检查文件函数
 check_file() {
@@ -45,7 +46,7 @@ check_file() {
     fi
 }
 
-echo -e "\n${BLUE}【1/6】清理残留文件...${NC}"
+echo -e "\n${BLUE}【1/7】清理残留文件...${NC}"
 cd "${OPENWRT_ROOT}"
 
 # 清理旧文件
@@ -64,7 +65,7 @@ for file in "${files_to_clean[@]}"; do
     fi
 done
 
-echo -e "\n${BLUE}【2/6】检查自定义文件...${NC}"
+echo -e "\n${BLUE}【2/7】检查自定义文件...${NC}"
 required_files=(
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/files/arch/arm64/boot/dts/rockchip/rk3568-xiguapi-v3.dts:内核设备树文件"
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/image/armv8.mk:armv8.mk 文件"
@@ -73,6 +74,7 @@ required_files=(
     "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3.dts:U-Boot 设备树文件"
     "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/arch/arm/dts/rk3568-xiguapi-v3-u-boot.dtsi:U-Boot 设备树头文件"
     "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch:内核 patch 文件"
+    "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network:网络配置文件"
 )
 
 for file_info in "${required_files[@]}"; do
@@ -82,7 +84,7 @@ for file_info in "${required_files[@]}"; do
 done
 echo -e "${GREEN}✅ 所有自定义文件检查通过${NC}"
 
-echo -e "\n${BLUE}【3/6】部署内核设备树和patch...${NC}"
+echo -e "\n${BLUE}【3/7】部署内核设备树和patch...${NC}"
 mkdir -p "$(dirname "${DTS_ORIGINAL_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/files/arch/arm64/boot/dts/rockchip/rk3568-xiguapi-v3.dts" "${DTS_ORIGINAL_PATH}"
 echo -e "${GREEN}✅ 内核设备树文件部署完成${NC}"
@@ -91,7 +93,7 @@ mkdir -p "$(dirname "${KERNEL_PATCH_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/patches-6.6/888-add-rk3568-xiguapi-v3-dtb.patch" "${KERNEL_PATCH_PATH}"
 echo -e "${GREEN}✅ 内核 patch 文件部署完成${NC}"
 
-echo -e "\n${BLUE}【4/6】部署 U-Boot 相关文件...${NC}"
+echo -e "\n${BLUE}【4/7】部署 U-Boot 相关文件...${NC}"
 # 部署 U-Boot defconfig
 mkdir -p "$(dirname "${UBOOT_DEFCONFIG_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/src/configs/nlnet-xiguapi-v3-rk3568_defconfig" "${UBOOT_DEFCONFIG_PATH}"
@@ -112,12 +114,24 @@ mkdir -p "$(dirname "${UBOOT_MAKEFILE_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/package/boot/uboot-rockchip/Makefile" "${UBOOT_MAKEFILE_PATH}"
 echo -e "${GREEN}✅ U-Boot Makefile 替换完成${NC}"
 
-echo -e "\n${BLUE}【5/6】替换 armv8.mk 文件...${NC}"
+echo -e "\n${BLUE}【5/7】替换 armv8.mk 文件...${NC}"
 mkdir -p "$(dirname "${ARMV8_MK_PATH}")"
 cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/image/armv8.mk" "${ARMV8_MK_PATH}"
 echo -e "${GREEN}✅ armv8.mk 文件替换完成${NC}"
 
-echo -e "\n${BLUE}【6/6】验证部署结果...${NC}"
+echo -e "\n${BLUE}【6/7】替换网络配置文件...${NC}"
+mkdir -p "$(dirname "${NETWORK_CONFIG_PATH}")"
+# 备份原始文件（如果存在）
+if [ -f "${NETWORK_CONFIG_PATH}" ] && [ ! -f "${NETWORK_CONFIG_PATH}.backup" ]; then
+    cp -f "${NETWORK_CONFIG_PATH}" "${NETWORK_CONFIG_PATH}.backup"
+    echo -e "${YELLOW}⚠️  原始网络配置文件已备份为：${NETWORK_CONFIG_PATH}.backup${NC}"
+fi
+
+cp -f "${CUSTOM_CONFIG_DIR}/target/linux/rockchip/armv8/base-files/etc/board.d/02_network" "${NETWORK_CONFIG_PATH}"
+chmod +x "${NETWORK_CONFIG_PATH}"
+echo -e "${GREEN}✅ 网络配置文件替换完成${NC}"
+
+echo -e "\n${BLUE}【7/7】验证部署结果...${NC}"
 verify_pass=0
 
 show_file_context() {
@@ -169,6 +183,7 @@ all_files=(
     "${UBOOT_DTS_PATH}"
     "${UBOOT_DTSI_PATH}"
     "${KERNEL_PATCH_PATH}"
+    "${NETWORK_CONFIG_PATH}"
 )
 
 for file_path in "${all_files[@]}"; do
@@ -194,6 +209,7 @@ key_files_to_check=(
     "${UBOOT_MAKEFILE_PATH}:xiguapi-v3:U-Boot Makefile"
     "${UBOOT_DEFCONFIG_PATH}:CONFIG_:U-Boot defconfig"
     "${KERNEL_PATCH_PATH}:xiguapi-v3:内核 patch 文件"
+    "${NETWORK_CONFIG_PATH}:xiguapi-v3:网络配置文件"
 )
 
 for file_info in "${key_files_to_check[@]}"; do
@@ -220,9 +236,19 @@ if [ ${verify_pass} -eq 0 ]; then
     echo -e "  ${GREEN}5. U-Boot 设备树头文件：${UBOOT_DTSI_PATH}${NC}"
     echo -e "  ${GREEN}6. U-Boot Makefile：${UBOOT_MAKEFILE_PATH}${NC}"
     echo -e "  ${GREEN}7. armv8.mk：${ARMV8_MK_PATH}${NC}"
+    echo -e "  ${GREEN}8. 网络配置(02_network)：${NETWORK_CONFIG_PATH}${NC}"
     echo -e "${BLUE}==========================================${NC}"
     
-
+    # 检查网络配置文件的执行权限
+    if [ -x "${NETWORK_CONFIG_PATH}" ]; then
+        echo -e "${GREEN}✅ 网络配置文件具有执行权限${NC}"
+    else
+        echo -e "${YELLOW}⚠️  网络配置文件缺少执行权限，尝试修复...${NC}"
+        chmod +x "${NETWORK_CONFIG_PATH}"
+        if [ -x "${NETWORK_CONFIG_PATH}" ]; then
+            echo -e "${GREEN}✅ 已修复网络配置文件执行权限${NC}"
+        fi
+    fi
     
     exit 0
 else
@@ -231,11 +257,13 @@ else
     echo -e "  1. 检查自定义文件中的关键词是否正确"
     echo -e "  2. 确保自定义文件不为空"
     echo -e "  3. 检查路径是否正确：自定义文件应放在正确的子目录中"
+    echo -e "  4. 确保网络配置文件具有执行权限（chmod +x）"
     
     echo -e "\n${YELLOW}📁 自定义目录结构：${NC}"
     find "${CUSTOM_CONFIG_DIR}" -type f \
         \( -name "*.dts" -o -name "*.mk" -o -name "Makefile" \
-        -o -name "*.defconfig" -o -name "*.patch" -o -name "*.dtsi" \) | sort
+        -o -name "*.defconfig" -o -name "*.patch" -o -name "*.dtsi" \
+        -o -name "02_network" \) | sort
     
     echo -e "\n${YELLOW}📁 目标部署路径：${NC}"
     for dir in \
@@ -243,7 +271,8 @@ else
         "$(dirname "${KERNEL_PATCH_PATH}")" \
         "$(dirname "${UBOOT_DEFCONFIG_PATH}")" \
         "$(dirname "${UBOOT_DTS_PATH}")" \
-        "$(dirname "${ARMV8_MK_PATH}")"; do
+        "$(dirname "${ARMV8_MK_PATH}")" \
+        "$(dirname "${NETWORK_CONFIG_PATH}")"; do
         if [ -d "${dir}" ]; then
             echo -e "  ${GREEN}✅ ${dir}${NC}"
         else
